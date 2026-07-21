@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Machine-wide browser lockdown so Content Guard is hard to bypass via
+  Machine-wide browser lockdown so NoPornForever is hard to bypass via
   Incognito / Guest / extra profiles (where the browser supports policy).
 
 .DESCRIPTION
@@ -97,7 +97,7 @@ function Remove-KeyIfEmpty([string]$Path) {
 }
 
 # Marker so -Remove only deletes what we created (values we set).
-$MarkerPath = "HKLM:\SOFTWARE\EasyPeasy\ContentGuard"
+$MarkerPath = "HKLM:\SOFTWARE\NoPornForever\ContentGuard"
 $MarkerName = "BrowserLockApplied"
 
 if (-not (Test-IsAdmin)) {
@@ -107,7 +107,7 @@ if (-not (Test-IsAdmin)) {
 # ── Capability banner ───────────────────────────────────────────────────────
 Write-Host @"
 
-EasyPeasy browser lockdown
+NoPornForever browser lockdown
 ==========================
 DOABLE with policy (Chrome / Edge):
   - Disable Guest mode
@@ -133,7 +133,7 @@ NOT DOABLE / weak:
 "@
 
 if ($Remove) {
-  Write-Host "Removing EasyPeasy browser lockdown policies..."
+  Write-Host "Removing NoPornForever browser lockdown policies..."
 
   foreach ($root in @(
       "HKLM:\SOFTWARE\Policies\Google\Chrome",
@@ -155,7 +155,7 @@ if ($Remove) {
     # Force-list subkey
     $fl = Join-Path $root "ExtensionInstallForcelist"
     if (Test-Path $fl) {
-      # Only remove our entry named "EasyPeasy1" if present; also clear numeric if marker says we own lock
+      # Only remove our entry named "NoPornForever1" if present; also clear numeric if marker says we own lock
       Remove-Item $fl -Recurse -Force -ErrorAction SilentlyContinue
     }
   }
@@ -167,7 +167,7 @@ if ($Remove) {
     if (Test-Path $p) {
       try {
         $j = Get-Content $p -Raw | ConvertFrom-Json
-        if ($j.policies._EasyPeasyManaged -eq $true -or $j.policies.PSObject.Properties.Name -contains "_EasyPeasyManaged") {
+        if ($j.policies._NoPornForeverManaged -eq $true -or $j.policies.PSObject.Properties.Name -contains "_NoPornForeverManaged") {
           Remove-Item $p -Force
           Write-Host "Removed $p"
         }
@@ -184,7 +184,7 @@ if ($Remove) {
     $k = Join-Path $ifeo $exe
     if (Test-Path $k) {
       $dbg = (Get-ItemProperty $k -ErrorAction SilentlyContinue).Debugger
-      if ($dbg -and $dbg -match "EasyPeasy|ContentGuard|blocked-browser") {
+      if ($dbg -and $dbg -match "NoPornForever|ContentGuard|blocked-browser") {
         Remove-Item $k -Recurse -Force -ErrorAction SilentlyContinue
         Write-Host "Unblocked $exe"
       }
@@ -316,13 +316,13 @@ $ffRoots = @(
 
 $ffPolicyDoc = @{
   policies = @{
-    _EasyPeasyManaged      = $true
+    _NoPornForeverManaged      = $true
     DisablePrivateBrowsing = $true
     BlockAboutAddons       = $true
     BlockAboutConfig       = $true
     # Don't install Chromium CRX here — wrong format.
     # If you later ship a Firefox port:
-    # Extensions = @{ Install = @("https://.../content-guard.xpi"); Locked = @("content-guard@easypeasy") }
+    # Extensions = @{ Install = @("https://.../content-guard.xpi"); Locked = @("content-guard@NoPornForever") }
     Preferences            = @{
       "browser.search.suggest.enabled" = @{ Value = $false; Status = "locked" }
     }
@@ -352,7 +352,7 @@ if ($BlockUnmanagedBrowsers) {
   $blocker = Join-Path $PSScriptRoot "blocked-browser.cmd"
   @"
 @echo off
-echo This browser is blocked by EasyPeasy Content Guard policy.
+echo This browser is blocked by NoPornForever policy.
 echo Use managed Chrome or Edge, or run unlock-browsers / lock-browsers.ps1 -Remove as admin.
 exit /b 1
 "@ | Set-Content -Path $blocker -Encoding ASCII

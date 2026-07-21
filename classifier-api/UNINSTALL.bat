@@ -1,5 +1,5 @@
 @echo off
-title EasyPeasy Classifier API — Uninstall
+title NoPornForever Classifier API — Uninstall
 cd /d "%~dp0"
 
 echo Removing auto-start task and stopping API...

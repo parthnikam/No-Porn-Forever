@@ -1,8 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "EasyPeasy Content Guard",
-  "version": "0.2.0",
-  "description": "Blocks NSFW domains, classifies search/URL intent, and removes non-safe images via a local ML API.",
+  "name": "NoPornForever",
+  "version": "0.2.1",
+  "description": "Blocks adult sites, bad searches, and unsafe images.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "permissions": [
     "webNavigation",
     "tabs",
@@ -29,12 +34,17 @@
     }
   ],
   "action": {
-    "default_title": "EasyPeasy Content Guard",
-    "default_popup": "popup.html"
+    "default_title": "NoPornForever",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "web_accessible_resources": [
     {
-      "resources": ["blocked.html", "blocked.js"],
+      "resources": ["blocked.html", "blocked.js", "icons/*"],
       "matches": ["<all_urls>"]
     }
   ]

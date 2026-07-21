@@ -9,7 +9,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-Write-Host "Starting EasyPeasy classifier API on http://127.0.0.1:8765 ..."
+Write-Host "Starting NoPornForever classifier API on http://127.0.0.1:8765 ..."
 Write-Host "First model load can take 30-90s (GPU recommended)."
 
 if ($Warmup) {

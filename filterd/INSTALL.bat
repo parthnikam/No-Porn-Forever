@@ -1,5 +1,5 @@
 @echo off
-title EasyPeasy filterd — Install
+title NoPornForeverd — Install
 cd /d "%~dp0"
 
 :: Elevate to Administrator if needed
@@ -12,12 +12,12 @@ if %errorlevel% neq 0 (
 
 echo.
 echo  ============================================
-echo   EasyPeasy DNS Filter — one-time install
+echo   NoPornForever DNS Filter — one-time install
 echo  ============================================
 echo.
 echo  This will:
 echo    - Copy filterd + blocklist to Program Files
-echo    - Install Windows service "EasyPeasyFilterd"
+echo    - Install Windows service "NoPornForeverFilterd"
 echo    - Start protection now
 echo    - Auto-start at every boot
 echo.

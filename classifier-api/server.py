@@ -1,5 +1,5 @@
 """
-Local classifier API for the EasyPeasy Chrome extension.
+Local classifier API for the NoPornForever Chrome extension.
 
 Endpoints:
   GET  /health
@@ -34,7 +34,7 @@ import image_categorizer as image_clf  # noqa: E402
 log = logging.getLogger("classifier-api")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-app = FastAPI(title="EasyPeasy Classifier API", version="0.1.1")
+app = FastAPI(title="NoPornForever Classifier API", version="0.1.1")
 
 # Extension service workers are CORS-exempt for host_permissions, but allow
 # broad origins so popup / content-script debugging stays simple.

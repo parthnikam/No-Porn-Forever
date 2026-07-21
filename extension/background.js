@@ -1,5 +1,5 @@
 /**
- * EasyPeasy Content Guard — service worker.
+ * NoPornForever — service worker.
  *
  * Layers:
  *  1) Domain blocklist (nsfw.txt) — instant URL host match

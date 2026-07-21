@@ -1,8 +1,8 @@
 """
-Production launcher for EasyPeasy Classifier API.
+Production launcher for NoPornForever Classifier API.
 
 - Single instance (port 8765)
-- Logs to %ProgramData%\\EasyPeasy\\classifier-api\\
+- Logs to %ProgramData%\\NoPornForever\\classifier-api\\
 - Optional model warmup after bind
 - Used by the Windows scheduled task / INSTALL.bat
 """
@@ -25,14 +25,17 @@ sys.path.insert(0, str(API_DIR))
 sys.path.insert(0, str(REPO_ROOT / "text-classifier"))
 sys.path.insert(0, str(REPO_ROOT / "image-classifier"))
 
-HOST = "127.0.0.1"
-PORT = 8765
-TASK_NAME = "EasyPeasyClassifierAPI"
+# 127.0.0.1 = desktop extension only.
+# 0.0.0.0   = also reachable from phones on LAN (Flutter mobile guardian).
+# Override: set NOPORNFOREVER_API_HOST or config.json "host".
+HOST = os.environ.get("NOPORNFOREVER_API_HOST", os.environ.get("EASYPEASY_API_HOST", "127.0.0.1"))
+PORT = int(os.environ.get("NOPORNFOREVER_API_PORT", os.environ.get("EASYPEASY_API_PORT", "8765")))
+TASK_NAME = "NoPornForeverClassifierAPI"
 
 
 def program_data_dir() -> Path:
     base = os.environ.get("ProgramData") or str(Path.home())
-    d = Path(base) / "EasyPeasy" / "classifier-api"
+    d = Path(base) / "NoPornForever" / "classifier-api"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -103,14 +106,23 @@ def warmup_async() -> None:
 
 
 def main() -> int:
+    global HOST, PORT
     log_path = setup_logging()
     cfg = load_config()
     do_warmup = cfg.get("warmup", True)
+    # config.json can force LAN bind for mobile demos: {"host": "0.0.0.0", "port": 8765}
+    if isinstance(cfg.get("host"), str) and cfg["host"].strip():
+        HOST = cfg["host"].strip()
+    if cfg.get("port") is not None:
+        try:
+            PORT = int(cfg["port"])
+        except (TypeError, ValueError):
+            pass
 
-    logging.info("=== EasyPeasy Classifier API starting ===")
-    logging.info("api_dir=%s pid=%s log=%s", API_DIR, os.getpid(), log_path)
+    logging.info("=== NoPornForever Classifier API starting ===")
+    logging.info("api_dir=%s pid=%s log=%s host=%s", API_DIR, os.getpid(), log_path, HOST)
 
-    if port_in_use(HOST, PORT):
+    if port_in_use("127.0.0.1", PORT) or (HOST == "0.0.0.0" and port_in_use(HOST, PORT)):
         logging.info("port %s already in use — API already running; exiting", PORT)
         return 0
 

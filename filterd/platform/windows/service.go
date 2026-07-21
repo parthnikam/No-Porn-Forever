@@ -16,22 +16,22 @@ import (
 )
 
 const (
-	// ServiceName is the SCM short name (sc query EasyPeasyFilterd).
-	ServiceName = "EasyPeasyFilterd"
+	// ServiceName is the SCM short name (sc query NoPornForeverFilterd).
+	ServiceName = "NoPornForeverFilterd"
 	// ServiceDisplayName shown in services.msc
-	ServiceDisplayName = "EasyPeasy DNS Filter (filterd)"
+	ServiceDisplayName = "NoPornForever DNS Filter (filterd)"
 	// ServiceDescription for services.msc
 	ServiceDescription = "Blocks adult/NSFW domains at the local DNS layer. Starts automatically with Windows."
 )
 
 // InstallDir is where the shippable binary + lists live after install.
 func InstallDir() string {
-	return filepath.Join(os.Getenv("ProgramFiles"), "EasyPeasy", "filterd")
+	return filepath.Join(os.Getenv("ProgramFiles"), "NoPornForever", "filterd")
 }
 
 // LogDir is where service logs are written.
 func LogDir() string {
-	return filepath.Join(os.Getenv("ProgramData"), "EasyPeasy", "filterd")
+	return filepath.Join(os.Getenv("ProgramData"), "NoPornForever", "filterd")
 }
 
 // DefaultLogPath is the main service log file.
@@ -262,7 +262,7 @@ func (f *filterService) Execute(args []string, r <-chan svc.ChangeRequest, chang
 
 	changes <- svc.Status{State: svc.Running, Accepts: cmds}
 	if f.elog != nil {
-		_ = f.elog.Info(1, "EasyPeasy filterd service running (DNS protect mode)")
+		_ = f.elog.Info(1, "NoPornForeverd service running (DNS protect mode)")
 	}
 
 loop:
@@ -376,7 +376,7 @@ func copyFile(src, dst string) error {
 
 
 func setServiceRecovery(s *mgr.Service) error {
-	// Equivalent to: sc failure EasyPeasyFilterd reset= 86400 actions= restart/5000/restart/30000/restart/60000
+	// Equivalent to: sc failure NoPornForeverFilterd reset= 86400 actions= restart/5000/restart/30000/restart/60000
 	actions := []mgr.RecoveryAction{
 		{Type: mgr.ServiceRestart, Delay: 5 * time.Second},
 		{Type: mgr.ServiceRestart, Delay: 30 * time.Second},

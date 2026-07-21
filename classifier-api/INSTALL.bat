@@ -1,15 +1,15 @@
 @echo off
-title EasyPeasy Classifier API — Install
+title NoPornForever Classifier API — Install
 cd /d "%~dp0"
 
 echo.
 echo  ================================================
-echo   EasyPeasy Classifier API — one-time install
+echo   NoPornForever Classifier API — one-time install
 echo  ================================================
 echo.
 echo  Registers a Windows task so the ML API starts
 echo  at every logon on http://127.0.0.1:8765
-echo  (required by the Content Guard extension)
+echo  (required by the NoPornForever extension)
 echo.
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1"

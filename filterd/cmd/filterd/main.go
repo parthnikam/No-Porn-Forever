@@ -14,8 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/easypeasy/filterd/core"
-	win "github.com/easypeasy/filterd/platform/windows"
+	"github.com/nopornforever/filterd/core"
+	win "github.com/nopornforever/filterd/platform/windows"
 )
 
 func main() {
@@ -114,8 +114,8 @@ Dev / emergency:
   filterd restore-dns             Fail-open if DNS left pointing at localhost
 
 Service name: %s
-Install dir:  %%ProgramFiles%%\EasyPeasy\filterd
-Log file:     %%ProgramData%%\EasyPeasy\filterd\filterd.log
+Install dir:  %%ProgramFiles%%\NoPornForever\filterd
+Log file:     %%ProgramData%%\NoPornForever\filterd\filterd.log
 
 After install, reboot or wait for delayed auto-start — no terminal needed.
 `, win.ServiceName)
@@ -523,7 +523,7 @@ func cmdInstall(args []string) error {
 	}
 	log.Printf("installed files to %s", win.InstallDir())
 
-	// Service ImagePath: "C:\Program Files\EasyPeasy\filterd\filterd.exe" run -protect
+	// Service ImagePath: "C:\Program Files\NoPornForever\filterd\filterd.exe" run -protect
 	// (When SCM starts us, IsWindowsService is true and we ignore CLI — but
 	// keeping run -protect makes sc qc readable and allows manual start.)
 	if err := win.InstallService(exe, []string{"run", "-protect"}); err != nil {

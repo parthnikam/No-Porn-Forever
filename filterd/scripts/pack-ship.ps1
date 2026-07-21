@@ -4,7 +4,7 @@
 
 .EXAMPLE
   .\scripts\pack-ship.ps1
-  # → dist\EasyPeasy-filterd-windows-amd64.zip
+  # → dist\NoPornForever-filterd-windows-amd64.zip
 #>
 $ErrorActionPreference = "Stop"
 $filterd = Split-Path $PSScriptRoot -Parent
@@ -36,7 +36,7 @@ foreach ($f in @(
   }
 }
 
-$zip = Join-Path $filterd "dist\EasyPeasy-filterd-windows-amd64.zip"
+$zip = Join-Path $filterd "dist\NoPornForever-filterd-windows-amd64.zip"
 New-Item -ItemType Directory -Path (Split-Path $zip) -Force | Out-Null
 if (Test-Path $zip) { Remove-Item $zip -Force }
 

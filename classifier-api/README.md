@@ -19,7 +19,7 @@ Local HTTP API on **`http://127.0.0.1:8765`** that loads the repo HuggingFace mo
    - Starts **now**
    - Starts again at **every Windows logon** (and at startup)
    - **Restarts** if it crashes (Task Scheduler, 5 retries)
-   - Logs to `%ProgramData%\EasyPeasy\classifier-api\classifier-api.log`
+   - Logs to `%ProgramData%\NoPornForever\classifier-api\classifier-api.log`
 
 Uninstall: **`UNINSTALL.bat`**.
 
@@ -49,6 +49,23 @@ python launch.py
 | POST | `/classify/text` | `{ "text": "..." }` |
 | POST | `/classify/image` | `{ "url": "..." }` or `{ "image_b64": "..." }` |
 
+## LAN bind (Flutter phone guardian)
+
+Default is `127.0.0.1` (extension only). For a physical phone or emulator on another machine:
+
+```powershell
+$env:NOPORNFOREVER_API_HOST = "0.0.0.0"
+python launch.py
+```
+
+Or `%ProgramData%\NoPornForever\classifier-api\config.json`:
+
+```json
+{ "host": "0.0.0.0", "port": 8765, "warmup": true }
+```
+
+Then in the mobile app set API base to `http://<this-pc-ip>:8765`.
+
 ## Why a scheduled task (not only a service)?
 
 The image/text models want **GPU + your user HuggingFace cache**. A task that runs **at logon as your user** sees CUDA correctly. A LocalSystem service often falls back to CPU or can’t see the GPU.
@@ -56,9 +73,9 @@ The image/text models want **GPU + your user HuggingFace cache**. A task that ru
 | Piece | Location |
 |-------|----------|
 | Code | this folder (`launch.py`, `server.py`) |
-| Config | `%ProgramData%\EasyPeasy\classifier-api\config.json` |
-| Log | `%ProgramData%\EasyPeasy\classifier-api\classifier-api.log` |
-| Task | Task Scheduler → `EasyPeasyClassifierAPI` |
+| Config | `%ProgramData%\NoPornForever\classifier-api\config.json` |
+| Log | `%ProgramData%\NoPornForever\classifier-api\classifier-api.log` |
+| Task | Task Scheduler → `NoPornForeverClassifierAPI` |
 
 ## Pair with the extension
 

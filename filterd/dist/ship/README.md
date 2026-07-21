@@ -7,7 +7,7 @@ Local DNS domain blocker for Windows. Loads HaGeZi-style lists, answers DNS on l
 ```powershell
 cd filterd
 .\scripts\pack-ship.ps1
-# → dist\EasyPeasy-filterd-windows-amd64.zip
+# → dist\NoPornForever-filterd-windows-amd64.zip
 ```
 
 On the target PC:
@@ -24,11 +24,11 @@ See [SHIP.md](SHIP.md).
 
 | Step | Detail |
 |------|--------|
-| Copy | `filterd.exe` + `nsfw.txt` → `%ProgramFiles%\EasyPeasy\filterd\` |
-| Service | `EasyPeasyFilterd` — **Automatic (delayed)** start |
+| Copy | `filterd.exe` + `nsfw.txt` → `%ProgramFiles%\NoPornForever\filterd\` |
+| Service | `NoPornForeverFilterd` — **Automatic (delayed)** start |
 | Recovery | Restart on failure (5s / 30s / 60s) |
 | Protect | System DNS → `127.0.0.1`, listen `:53`, lockdown + Chrome/Edge DoH off |
-| Log | `%ProgramData%\EasyPeasy\filterd\filterd.log` |
+| Log | `%ProgramData%\NoPornForever\filterd\filterd.log` |
 
 After install, **no daily command** is required.
 

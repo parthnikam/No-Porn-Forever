@@ -52,8 +52,8 @@ func CopyInstallFiles([]string) (string, error)               { return "", errOS
 type ServiceRunner func(stop <-chan struct{}) error
 
 const (
-	ServiceName        = "EasyPeasyFilterd"
-	ServiceDisplayName = "EasyPeasy DNS Filter (filterd)"
+	ServiceName        = "NoPornForeverFilterd"
+	ServiceDisplayName = "NoPornForever DNS Filter (filterd)"
 )
 
 func errOS() error { return fmt.Errorf("windows DNS helpers are only available on Windows") }

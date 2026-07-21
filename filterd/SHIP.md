@@ -2,7 +2,7 @@
 
 ## What the user does
 
-1. Unzip `EasyPeasy-filterd-windows-amd64.zip`
+1. Unzip `NoPornForever-filterd-windows-amd64.zip`
 2. Right-click **`INSTALL.bat`** → **Run as administrator**
 3. Click through UAC once  
 4. Close the window — **done**
@@ -18,9 +18,9 @@ Protection:
 
 | Item | Location |
 |------|----------|
-| Binary + `nsfw.txt` | `%ProgramFiles%\EasyPeasy\filterd\` |
-| Windows service | `EasyPeasyFilterd` (Automatic, delayed start) |
-| Log file | `%ProgramData%\EasyPeasy\filterd\filterd.log` |
+| Binary + `nsfw.txt` | `%ProgramFiles%\NoPornForever\filterd\` |
+| Windows service | `NoPornForeverFilterd` (Automatic, delayed start) |
+| Log file | `%ProgramData%\NoPornForever\filterd\filterd.log` |
 | DNS snapshot | `%AppData%\filterd\dns_snapshot.json` (via UserConfigDir for SYSTEM may differ; uses default snapshot path API) |
 
 > Note: the service runs as **LocalSystem**. Snapshot path uses the system profile’s config dir when running as the service.

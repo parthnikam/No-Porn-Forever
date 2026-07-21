@@ -1,19 +1,18 @@
+function setStatus(el, ok, text) {
+  const cls = ok === true ? "ok" : ok === false ? "bad" : "warn";
+  el.innerHTML = '<span class="dot ' + cls + '"></span>' + text;
+}
+
 function setApiRow(apiStatus) {
   const apiEl = document.getElementById("api");
   if (!apiStatus) {
-    apiEl.innerHTML = 'Classifier API: <span class="warn">unknown</span>';
+    setStatus(apiEl, null, "unknown");
     return;
   }
   if (apiStatus.ok) {
-    apiEl.innerHTML =
-      'Classifier API: <span class="ok">online</span> · ' +
-      (apiStatus.detail || "");
+    setStatus(apiEl, true, "online");
   } else {
-    apiEl.innerHTML =
-      'Classifier API: <span class="bad">offline</span><br/>' +
-      '<span class="hint">' +
-      (apiStatus.detail || "start classifier-api/run.ps1") +
-      "</span>";
+    setStatus(apiEl, false, "offline");
   }
 }
 
@@ -21,19 +20,18 @@ function refresh() {
   chrome.runtime.sendMessage({ type: "status" }, (s) => {
     if (chrome.runtime.lastError) {
       document.getElementById("list").textContent =
-        "Error: " + chrome.runtime.lastError.message;
+        chrome.runtime.lastError.message;
       return;
     }
     const listEl = document.getElementById("list");
     if (s.listReady) {
-      listEl.innerHTML =
-        'List: <span class="ok">ready</span> (' +
-        s.listCount.toLocaleString() +
-        " domains)";
+      setStatus(
+        listEl,
+        true,
+        "ready · " + s.listCount.toLocaleString()
+      );
     } else {
-      listEl.innerHTML =
-        'List: <span class="bad">not loaded</span> ' +
-        (s.loadError || "run scripts/sync-list.ps1");
+      setStatus(listEl, false, "not loaded");
     }
 
     setApiRow(s.apiStatus);
@@ -41,17 +39,11 @@ function refresh() {
     const lvl = s.proxy?.levelOfControl || "unknown";
     const proxyEl = document.getElementById("proxy");
     if (lvl === "controlled_by_other_extensions") {
-      proxyEl.innerHTML =
-        'Proxy: <span class="warn">VPN/proxy extension active</span>';
-      document.getElementById("hint").textContent =
-        "Domain + text + image guards still run. Keep this extension enabled.";
+      setStatus(proxyEl, null, "other extension");
     } else if (lvl === "controlled_by_this_extension") {
-      proxyEl.innerHTML = 'Proxy: <span class="ok">this extension</span>';
+      setStatus(proxyEl, true, "active");
     } else {
-      proxyEl.innerHTML =
-        'Proxy: <span class="ok">' + lvl.replaceAll("_", " ") + "</span>";
-      document.getElementById("hint").textContent =
-        "Text/image ML need classifier-api on :8765. Pair with filterd for system DNS.";
+      setStatus(proxyEl, true, "ok");
     }
   });
 }

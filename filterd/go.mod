@@ -1,4 +1,4 @@
-module github.com/easypeasy/filterd
+module github.com/nopornforever/filterd
 
 go 1.26.5
 

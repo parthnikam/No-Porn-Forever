@@ -6,10 +6,29 @@
 
 Privileged local DNS filter. **Install once as a Windows service** — auto-starts at boot, no terminal every day.
 
+## Mobile companion (Flutter) — Android + iOS
+
+Phone UI + floating protection island, same NSFW list semantics as desktop.
+
+| | Android | iOS |
+|--|---------|-----|
+| DNS filter tunnel | **Local `VpnService` (implemented)** | Network Extension scaffold (Apple entitlements) |
+| UI / list engine | Flutter + Dart | Flutter + Dart |
+
+```powershell
+cd mobile
+flutter pub get
+flutter run   # prefer a physical Android device for the VPN demo
+```
+
+See [`mobile/README.md`](mobile/README.md).
+
+**ML on mobile:** the Flutter app can call the same `classifier-api` (text intent + screen/WebView images). Explicit content → lock and close the app. Point the phone at your PC (`NOPORNFOREVER_API_HOST=0.0.0.0`, LAN URL).
+
 ```powershell
 cd filterd
 .\scripts\pack-ship.ps1
-# Ship: dist\EasyPeasy-filterd-windows-amd64.zip
+# Ship: dist\NoPornForever-filterd-windows-amd64.zip
 # User: unzip → right-click INSTALL.bat → Run as administrator
 ```
 
@@ -49,7 +68,7 @@ cd ..\extension
 | Images | Classifies `<img>` → removes anything not **Normal** |
 
 See [`extension/README.md`](extension/README.md) and [`classifier-api/`](classifier-api/).  
-Use **filterd + Content Guard extension + classifier-api** together.
+Use **filterd + NoPornForever extension + classifier-api** together.
 
 **Lock Incognito/Guest (Admin):** `extension/scripts/lock-browsers.ps1` — details in [`docs/BROWSER_LOCKDOWN.md`](docs/BROWSER_LOCKDOWN.md).
 

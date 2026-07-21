@@ -26,7 +26,7 @@ This is **policy + OS DNS**, not magic inside one Load-unpacked extension.
 ```text
 1. filterd -protect          → device DNS floor (all browsers)
 2. lock-browsers.ps1         → Chrome/Edge Guest off, Incognito off (or gated)
-3. Publish CRX + ExtensionId → force-install Content Guard on Chrome/Edge
+3. Publish CRX + ExtensionId → force-install NoPornForever on Chrome/Edge
 4. Uninstall or IFEO-block   → Opera / DDG / Brave if you need “no escape hatch”
 5. Optional AppLocker/WDAC   → real executable allow-list (strongest)
 ```

@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-  One-time install: register EasyPeasy Classifier API to start at every logon.
+  One-time install: register NoPornForever Classifier API to start at every logon.
 
 .DESCRIPTION
-  Creates a Windows Scheduled Task "EasyPeasyClassifierAPI" that launches
+  Creates a Windows Scheduled Task "NoPornForeverClassifierAPI" that launches
   launch.py with your Python (conda py3.10 recommended). Models stay warm for
   the Chrome extension at http://127.0.0.1:8765
 
@@ -34,10 +34,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$TaskName = "EasyPeasyClassifierAPI"
+$TaskName = "NoPornForeverClassifierAPI"
 $ApiDir = $PSScriptRoot
 $LaunchPy = Join-Path $ApiDir "launch.py"
-$DataDir = Join-Path $env:ProgramData "EasyPeasy\classifier-api"
+$DataDir = Join-Path $env:ProgramData "NoPornForever\classifier-api"
 
 function Find-Python {
   if ($PythonExe -and (Test-Path $PythonExe)) { return (Resolve-Path $PythonExe).Path }
@@ -129,7 +129,7 @@ Register-ScheduledTask `
   -Trigger $triggerLogon `
   -Settings $settings `
   -Principal $principal `
-  -Description "EasyPeasy local ML API (text+image) for Content Guard extension on 127.0.0.1:8765" `
+  -Description "NoPornForever local ML API (text+image) for NoPornForever extension on 127.0.0.1:8765" `
   -Force | Out-Null
 
 Write-Host "Registered scheduled task: $TaskName"

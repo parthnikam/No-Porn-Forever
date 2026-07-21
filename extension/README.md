@@ -1,4 +1,4 @@
-# EasyPeasy Content Guard (browser extension)
+# NoPornForever (browser extension)
 
 Three browser layers on top of system DNS (`filterd`):
 
@@ -84,7 +84,7 @@ If the API is offline, domain blocking still works; text/image layers fail open 
 | Layer | Covers |
 |-------|--------|
 | `filterd run -protect` | Whole OS DNS, most apps |
-| **Content Guard extension** | Browser domains + search text + page images |
+| **NoPornForever extension** | Browser domains + search text + page images |
 
 Use **both**.
 

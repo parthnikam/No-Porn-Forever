@@ -26,12 +26,12 @@ type Snapshot struct {
 // DefaultSnapshotPath is where we store previous DNS settings.
 // Uses ProgramData so the LocalSystem service and an admin uninstall share one file.
 func DefaultSnapshotPath() string {
-	dir := LogDir() // %ProgramData%\EasyPeasy\filterd
+	dir := LogDir() // %ProgramData%\NoPornForever\filterd
 	if dir == "" || dir == string(filepath.Separator) {
 		if pd := os.Getenv("ProgramData"); pd != "" {
-			dir = filepath.Join(pd, "EasyPeasy", "filterd")
+			dir = filepath.Join(pd, "NoPornForever", "filterd")
 		} else {
-			dir = filepath.Join(os.TempDir(), "EasyPeasy", "filterd")
+			dir = filepath.Join(os.TempDir(), "NoPornForever", "filterd")
 		}
 	}
 	return filepath.Join(dir, "dns_snapshot.json")
