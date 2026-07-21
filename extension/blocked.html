@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Site blocked</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #0f1419;
+        --card: #1a2332;
+        --text: #e7ecf3;
+        --muted: #9aa8bc;
+        --accent: #5b9fd4;
+        --warn: #e8a838;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        background: radial-gradient(1200px 600px at 20% -10%, #1e3a5f 0%, var(--bg) 55%);
+        color: var(--text);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+      }
+      .card {
+        max-width: 520px;
+        width: 100%;
+        background: var(--card);
+        border: 1px solid #2a3a50;
+        border-radius: 16px;
+        padding: 28px 28px 22px;
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 1.45rem;
+        font-weight: 650;
+      }
+      .host {
+        font-family: ui-monospace, Consolas, monospace;
+        color: var(--accent);
+        word-break: break-all;
+        margin: 12px 0 16px;
+        font-size: 1.05rem;
+      }
+      p {
+        margin: 0 0 12px;
+        line-height: 1.5;
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+      .badge {
+        display: inline-block;
+        font-size: 0.75rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        background: #2a3f2a;
+        color: #8fd48f;
+        border: 1px solid #3d5c3d;
+        padding: 4px 8px;
+        border-radius: 999px;
+        margin-bottom: 14px;
+      }
+      .warn {
+        background: #3a3020;
+        border: 1px solid #6a5528;
+        color: #f0d9a0;
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin-top: 16px;
+        font-size: 0.9rem;
+        display: none;
+      }
+      .warn strong { color: var(--warn); }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="badge">EasyPeasy Domain Guard</div>
+      <h1>This site is blocked</h1>
+      <div class="host" id="host">—</div>
+      <p>
+        The domain is on your local NSFW blocklist. This block is enforced
+        <em>inside the browser</em>, so it still applies when a VPN extension
+        tunnels traffic past system DNS.
+      </p>
+      <p>
+        System DNS filtering (filterd) and this extension work together:
+        DNS covers most apps; the extension covers the browser.
+      </p>
+      <div class="warn" id="proxyWarn">
+        <strong>Proxy / VPN extension detected.</strong>
+        Another extension is controlling browser proxy settings. Domain Guard
+        blocked this navigation by URL — keep this extension enabled or VPN
+        bypass will work again.
+      </div>
+    </div>
+    <script src="blocked.js"></script>
+  </body>
+</html>

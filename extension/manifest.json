@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "EasyPeasy Domain Guard",
+  "version": "0.1.0",
+  "description": "Blocks NSFW domains at the browser layer — works even when a VPN extension proxies traffic past system DNS.",
+  "permissions": [
+    "webNavigation",
+    "tabs",
+    "storage",
+    "proxy",
+    "alarms"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "EasyPeasy Domain Guard",
+    "default_popup": "popup.html"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["blocked.html", "blocked.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body {
+        font-family: "Segoe UI", system-ui, sans-serif;
+        margin: 0;
+        padding: 12px 14px;
+        min-width: 260px;
+        background: #121820;
+        color: #e7ecf3;
+      }
+      h1 {
+        font-size: 14px;
+        margin: 0 0 10px;
+      }
+      .row {
+        font-size: 12px;
+        color: #9aa8bc;
+        margin: 6px 0;
+      }
+      .ok { color: #8fd48f; }
+      .bad { color: #f0a0a0; }
+      .warn { color: #e8a838; }
+      button {
+        margin-top: 10px;
+        width: 100%;
+        border: 0;
+        border-radius: 8px;
+        padding: 8px;
+        background: #2a4a6a;
+        color: #fff;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>EasyPeasy Domain Guard</h1>
+    <div class="row" id="list">List: …</div>
+    <div class="row" id="proxy">Proxy: …</div>
+    <div class="row" id="hint"></div>
+    <button id="reload" type="button">Reload blocklist</button>
+    <script src="popup.js"></script>
+  </body>
+</html>
