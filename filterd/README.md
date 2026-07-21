@@ -1,120 +1,73 @@
 # filterd
 
-Local DNS domain blocker. Loads HaGeZi-style lists from `dns-blocklists/`, answers DNS on localhost, and (on Windows) can point system DNS at itself.
+Local DNS domain blocker for Windows. Loads HaGeZi-style lists, answers DNS on localhost, points the OS at itself, and **runs as a Windows service** so protection survives reboot without opening a terminal.
 
-## What it does
+## Ship it (no terminal for the end user)
 
-1. Loads blocklists (`||domain^` / hosts-style).
-2. Matches exact names and **parent domains** (`a.b.example.com` hits `example.com`).
-3. Runs a DNS proxy: **blocked → NXDOMAIN**, else forward to upstream.
-4. **Windows:** optional system DNS takeover + light anti-bypass firewall rules.
-5. On stop: restores previous DNS (**fail-open**).
+```powershell
+cd filterd
+.\scripts\pack-ship.ps1
+# → dist\EasyPeasy-filterd-windows-amd64.zip
+```
 
-## What it does **not** do
+On the target PC:
 
-- Stop raw-IP access, custom DoH, or VPN-internal DNS  
-- Work the same on every OS without a native adapter  
-- MITM HTTPS or install a root CA  
-- Use the ML image/text classifiers (those belong in the browser extension)
+1. Unzip  
+2. Right-click **`INSTALL.bat`** → **Run as administrator** (once)  
+3. Done — auto-starts at boot  
 
-## Build
+Uninstall: **`UNINSTALL.bat`** as administrator.
+
+See [SHIP.md](SHIP.md).
+
+## What install does
+
+| Step | Detail |
+|------|--------|
+| Copy | `filterd.exe` + `nsfw.txt` → `%ProgramFiles%\EasyPeasy\filterd\` |
+| Service | `EasyPeasyFilterd` — **Automatic (delayed)** start |
+| Recovery | Restart on failure (5s / 30s / 60s) |
+| Protect | System DNS → `127.0.0.1`, listen `:53`, lockdown + Chrome/Edge DoH off |
+| Log | `%ProgramData%\EasyPeasy\filterd\filterd.log` |
+
+After install, **no daily command** is required.
+
+## Commands (optional / power users)
+
+```text
+filterd install       # same as INSTALL.bat (Admin)
+filterd uninstall     # stop, restore DNS, remove service
+filterd start|stop
+filterd status
+filterd restore-dns   # emergency fail-open
+filterd test domain   # list check only
+filterd run -protect  # foreground (dev); Ctrl+C restores DNS
+```
+
+## Build from source
 
 ```powershell
 cd filterd
 go test ./...
-```
-
-## Default list: `filterd/nsfw.txt`
-
-With no `-lists` flag, filterd loads the HaGeZi NSFW list sitting next to the binary:
-
-```text
-filterd/nsfw.txt
-```
-
-Optional threat list from the repo can be added explicitly:
-
-```powershell
-.\filterd.exe run -lists nsfw.txt,..\dns-blocklists\tif.mini.txt
+go build -o filterd.exe ./cmd/filterd
 ```
 
 ## Why `test` blocks but Chrome still works
 
-| Command | What it does |
-|--------|----------------|
-| `filterd test domain` | Checks the **list only**. No effect on browsers. |
-| `filterd run` | Listens on **127.0.0.1:8053**. OS DNS is unchanged → browsers ignore it. |
-| `filterd run -protect` | **Admin required.** Sets OS DNS to `127.0.0.1`, listens on port **53**. |
+| Command | Effect on browser |
+|--------|-------------------|
+| `filterd test x` | **None** — only checks the list file |
+| `filterd run` | **None** — listens on `:8053`, OS DNS unchanged |
+| `filterd install` or `run -protect` | **Yes** — OS DNS → `127.0.0.1:53` |
 
-Right now if your adapters still show the router (e.g. `192.168.0.1`), the browser never talks to filterd.
+## Safety
 
-Also disable browser **Secure DNS / DNS over HTTPS** (Chrome: Settings → Privacy → Use secure DNS → **Off** / use your current service provider), or Chrome will skip the OS resolver.
+- **Fail-open on graceful stop:** service stop / uninstall restores previous DNS  
+- **Hard kill:** recovery restarts the service; if DNS is stuck, run `restore-dns` or UNINSTALL  
+- Large lists load once into memory; matching walks parent labels  
 
-## Quick test (no admin — does not filter the browser)
+## Not in scope
 
-```powershell
-.\filterd.exe test xhamster.com
-.\filterd.exe run
-# only queries aimed at 127.0.0.1:8053 are filtered
-```
-
-## Filter the browser (Administrator)
-
-```powershell
-# 1) Stop any old filterd first
-Get-Process filterd -ErrorAction SilentlyContinue | Stop-Process -Force
-
-# 2) Start protection (Admin terminal)
-cd filterd
-.\filterd.exe run -protect
-
-# 3) Confirm EVERY adapter is only 127.0.0.1 (not the router on Ethernet/Wi-Fi)
-Get-DnsClientServerAddress -AddressFamily IPv4 | Format-Table InterfaceAlias,ServerAddresses
-
-# 4) Fully quit Chrome/Edge (all windows) and reopen — DoH policy applies on restart
-# 5) Hard-refresh or try an Incognito window (avoids cached IPs)
-
-# Emergency recovery:
-.\filterd.exe restore-dns
-```
-
-### Common bypass we fixed
-
-| Leak | What happens |
-|------|----------------|
-| Ethernet still on router DNS while Wi-Fi is 127.0.0.1 | Windows queries **both**; router answers and site loads |
-| Chrome/Edge Secure DNS (DoH) | Browser resolves over HTTPS; ignores OS DNS |
-| DNS cache | Old IP still used until flush / new browser session |
-
-`-protect` now: rewrites **all** adapters, disables smart multi-homed DNS, turns off Chrome/Edge DoH policy, blocks common DoH IPs on :443, flushes cache.
-
-Upstream default is `1.1.1.1:53`. Lockdown **exempts** that upstream IP from the public-resolver block list so filterd can still recurse.
-
-## Commands
-
-| Command | Purpose |
-|--------|---------|
-| `run` | Start proxy |
-| `test <domain>` | Print BLOCK/ALLOW |
-| `status` | Snapshot + current adapter DNS |
-| `restore-dns` | Fail-open recovery |
-
-## Layout
-
-```text
-filterd/
-  core/                 # parse, match, DNS proxy (portable)
-  platform/windows/     # DNS set/restore, firewall lockdown
-  platform/macos/       # stub
-  platform/linux/       # stub
-  cmd/filterd/          # CLI
-  allowlist.txt
-  testdata/
-```
-
-## Safety notes
-
-- Prefer **fail-open**: Ctrl+C restores DNS when `-system-dns` was used.
-- If the process is killed hard, run `filterd restore-dns`.
-- Large lists take a few seconds to load into memory once; matching is O(labels).
-- Browser **Secure DNS / DoH** can bypass this — disable it or use a companion extension.
+- Raw IP access, custom DoH, VPN tunnel DNS  
+- Image/text ML (browser extension + classifier-api)  
+- macOS/Linux service adapters (stubs only)

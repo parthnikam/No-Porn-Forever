@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -18,6 +19,27 @@ import (
 )
 
 func main() {
+	// When launched by Windows Service Control Manager, jump straight into
+	// protect mode — no CLI required.
+	if isSvc, err := win.IsWindowsService(); err == nil && isSvc {
+		setupServiceLogging()
+		err := win.RunService(func(stop <-chan struct{}) error {
+			return runProtect(runOptions{
+				listen:     "127.0.0.1:53",
+				upstream:   "1.1.1.1:53",
+				systemDNS:  true,
+				lockdown:   true,
+				snapshot:   win.DefaultSnapshotPath(),
+				stop:       stop,
+			})
+		})
+		if err != nil {
+			log.Printf("service error: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
 	log.SetPrefix("filterd: ")
 
@@ -33,6 +55,14 @@ func main() {
 	switch cmd {
 	case "run":
 		err = cmdRun(args)
+	case "install":
+		err = cmdInstall(args)
+	case "uninstall":
+		err = cmdUninstall(args)
+	case "start":
+		err = cmdStart(args)
+	case "stop":
+		err = cmdStop(args)
 	case "test":
 		err = cmdTest(args)
 	case "status":
@@ -52,43 +82,43 @@ func main() {
 	}
 }
 
+func setupServiceLogging() {
+	_ = os.MkdirAll(win.LogDir(), 0o755)
+	logPath := win.DefaultLogPath()
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		log.SetFlags(log.LstdFlags | log.Lmsgprefix)
+		log.SetPrefix("filterd: ")
+		log.Printf("could not open log file %s: %v", logPath, err)
+		return
+	}
+	// Keep process alive with file open; OS closes on exit.
+	log.SetOutput(io.MultiWriter(f, os.Stderr))
+	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
+	log.SetPrefix("filterd: ")
+}
+
 func printUsage() {
-	fmt.Fprintf(os.Stderr, `filterd — local DNS domain blocker
+	fmt.Fprintf(os.Stderr, `filterd — local DNS domain blocker (Windows)
 
-Usage:
-  filterd run [flags]              Start DNS proxy (optionally take over system DNS)
-  filterd test <domain> [flags]    Check whether a domain would be blocked
-  filterd status                   Show snapshot path / basic info
-  filterd restore-dns              Restore DNS from last snapshot (fail-open recovery)
+Ship / everyday use (Administrator once):
+  filterd install                 Install as Windows service + start (auto-runs at boot)
+  filterd uninstall               Stop, restore DNS, remove service
+  filterd start | stop            Control the installed service
+  filterd status                  Service + DNS status
 
-Common flags (run / test):
-  -lists string
-        Comma-separated blocklist files (default: filterd/nsfw.txt)
-  -allow string
-        Allowlist file (default: filterd/allowlist.txt if present)
-  -listen string
-        Listen address (default 127.0.0.1:8053; use 127.0.0.1:53 + admin for system DNS)
-  -upstream string
-        Upstream DNS host:port (default 1.1.1.1:53)
-  -system-dns
-        Point Windows adapters at 127.0.0.1 so browsers use filterd (requires admin)
-  -lockdown
-        Block outbound DNS to common public resolvers (requires admin)
-  -protect
-        Browser protection: -system-dns + -lockdown + listen 127.0.0.1:53 (requires admin)
-  -json
-        JSON output for test
+Dev / emergency:
+  filterd run -protect            Foreground protect mode (Ctrl+C restores DNS)
+  filterd run                     Dev proxy on :8053 (browser NOT filtered)
+  filterd test <domain>           Check blocklist only
+  filterd restore-dns             Fail-open if DNS left pointing at localhost
 
-IMPORTANT:
-  "filterd test" only checks the list. It does NOT filter Chrome/Edge.
-  Browsers use the OS DNS server. Without -protect / -system-dns they ignore filterd.
+Service name: %s
+Install dir:  %%ProgramFiles%%\EasyPeasy\filterd
+Log file:     %%ProgramData%%\EasyPeasy\filterd\filterd.log
 
-Examples:
-  filterd test xhamster.com                 # list check only
-  filterd run                               # dev proxy on :8053 (browser NOT filtered)
-  filterd run -protect                      # elevated: filter whole machine
-  filterd restore-dns                       # undo system DNS if needed
-`)
+After install, reboot or wait for delayed auto-start — no terminal needed.
+`, win.ServiceName)
 }
 
 // searchRoots returns directories to look for nsfw.txt / allowlist.txt.
@@ -109,7 +139,8 @@ func searchRoots() []string {
 		}
 	}
 
-	// Prefer the directory that contains the binary (filterd/), then cwd.
+	// Prefer install dir, then binary dir, then cwd.
+	add(win.InstallDir())
 	if exe, err := os.Executable(); err == nil {
 		exeDir := filepath.Dir(exe)
 		add(exeDir)
@@ -137,7 +168,6 @@ func findFile(name string) string {
 	return ""
 }
 
-// defaultListPaths returns the NSFW blocklist next to the binary / in filterd/.
 func defaultListPaths() []string {
 	if p := findFile("nsfw.txt"); p != "" {
 		return []string{p}
@@ -235,8 +265,6 @@ func cmdTest(args []string) error {
 	return nil
 }
 
-// hoistFlags moves -flag / --flag tokens (and their values) before positionals
-// so `test example.com -lists x` works with the Go flag package.
 func hoistFlags(args []string) []string {
 	var flags, pos []string
 	boolFlags := map[string]bool{
@@ -257,7 +285,6 @@ func hoistFlags(args []string) []string {
 			if strings.Contains(a, "=") || boolFlags[a] {
 				continue
 			}
-			// flag with separate value
 			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				i++
 				flags = append(flags, args[i])
@@ -267,6 +294,17 @@ func hoistFlags(args []string) []string {
 		pos = append(pos, a)
 	}
 	return append(flags, pos...)
+}
+
+type runOptions struct {
+	lists     string
+	allow     string
+	listen    string
+	upstream  string
+	systemDNS bool
+	lockdown  bool
+	snapshot  string
+	stop      <-chan struct{} // if nil, use OS signals
 }
 
 func cmdRun(args []string) error {
@@ -289,7 +327,6 @@ func cmdRun(args []string) error {
 		*lockdown = true
 	}
 
-	// Browsers only see filterd if the OS sends DNS to us on :53.
 	listenAddr := *listen
 	if listenAddr == "" {
 		if *systemDNS {
@@ -299,33 +336,43 @@ func cmdRun(args []string) error {
 		}
 	}
 
-	eng, err := loadEngine(*lists, *allow)
+	return runProtect(runOptions{
+		lists:     *lists,
+		allow:     *allow,
+		listen:    listenAddr,
+		upstream:  *upstream,
+		systemDNS: *systemDNS,
+		lockdown:  *lockdown,
+		snapshot:  *snapshotPath,
+		stop:      nil,
+	})
+}
+
+func runProtect(opt runOptions) error {
+	if !opt.systemDNS {
+		log.Printf("")
+		log.Printf("*** DEV MODE: browsers will NOT be filtered ***")
+		log.Printf("*** filterd is only on %s; your OS DNS is unchanged. ***", opt.listen)
+		log.Printf("*** For always-on protection: filterd install  (Administrator) ***")
+		log.Printf("")
+	}
+
+	eng, err := loadEngine(opt.lists, opt.allow)
 	if err != nil {
 		return err
 	}
 
-	if !*systemDNS {
-		log.Printf("")
-		log.Printf("*** DEV MODE: browsers will NOT be filtered ***")
-		log.Printf("*** filterd is only on %s; your OS DNS is unchanged. ***", listenAddr)
-		log.Printf("*** `filterd test` only checks the list file — it does not change the browser. ***")
-		log.Printf("*** For browser blocking, run elevated: ***")
-		log.Printf("***   filterd run -protect ***")
-		log.Printf("*** Also disable Chrome/Edge Secure DNS (use system resolver). ***")
-		log.Printf("")
-	}
-
-	// Optional Windows system integration
 	appliedDNS := false
 	appliedLock := false
 	appliedBrowserPolicy := false
-	if *systemDNS {
-		if _, port, err := net.SplitHostPort(listenAddr); err == nil && port != "53" {
-			log.Printf("warning: -system-dns points OS at 127.0.0.1 (port 53) but -listen is %s", listenAddr)
+
+	if opt.systemDNS {
+		if _, port, err := net.SplitHostPort(opt.listen); err == nil && port != "53" {
+			log.Printf("warning: -system-dns points OS at 127.0.0.1 (port 53) but -listen is %s", opt.listen)
 		}
-		log.Printf("snapshot + apply system DNS → 127.0.0.1 on ALL adapters (snapshot %s)", *snapshotPath)
-		if err := win.SnapshotAndApply(*snapshotPath); err != nil {
-			return fmt.Errorf("system-dns: %w (run PowerShell/Terminal as Administrator)", err)
+		log.Printf("snapshot + apply system DNS → 127.0.0.1 on ALL adapters (snapshot %s)", opt.snapshot)
+		if err := win.SnapshotAndApply(opt.snapshot); err != nil {
+			return fmt.Errorf("system-dns: %w (run as Administrator / install the service)", err)
 		}
 		if bad, err := win.VerifyLocalhostDNS(); err != nil {
 			log.Printf("verify DNS: %v", err)
@@ -335,46 +382,41 @@ func cmdRun(args []string) error {
 				log.Printf("  - %s", b)
 			}
 		} else {
-			log.Printf("verified: all adapters use only 127.0.0.1 / ::1")
+			log.Printf("verified: adapters use localhost DNS (IPv4)")
 		}
-		log.Printf("disabling Chrome/Edge Secure DNS + forcing ProxyMode=direct (blocks many VPN extensions)")
+		log.Printf("disabling Chrome/Edge Secure DNS + ProxyMode=direct")
 		if err := win.DisableBrowserSecureDNS(); err != nil {
 			log.Printf("warning: could not set browser policies: %v", err)
-			log.Printf("  manually: turn off Secure DNS; install extension/ Domain Guard for VPN bypass")
 		} else {
 			appliedBrowserPolicy = true
-			log.Printf("Chrome/Edge: DoH off, ProxyMode=direct (restart browser)")
-			log.Printf("VPN extensions still need: load unpacked extension/ (Domain Guard) — see extension/README.md")
 		}
 		if err := win.FlushDNS(); err != nil {
 			log.Printf("flush DNS cache: %v (continuing)", err)
 		}
 		appliedDNS = true
 	}
-	if *lockdown {
-		host, _, err := net.SplitHostPort(*upstream)
+
+	if opt.lockdown {
+		host, _, err := net.SplitHostPort(opt.upstream)
 		if err != nil {
-			host = *upstream
+			host = opt.upstream
 		}
-		log.Printf("enabling DNS lockdown (public DNS :53 + DoH :443; upstream %s exempt on :53)", host)
+		log.Printf("enabling DNS lockdown (upstream %s exempt)", host)
 		if err := win.EnableDNSLockdown(host); err != nil {
-			return fmt.Errorf("lockdown: %w (try running as Administrator)", err)
+			return fmt.Errorf("lockdown: %w (need Administrator)", err)
 		}
 		appliedLock = true
 	}
 
 	proxy, err := core.NewProxy(core.ProxyConfig{
-		ListenAddr: listenAddr,
-		Upstream:   *upstream,
+		ListenAddr: opt.listen,
+		Upstream:   opt.upstream,
 		Engine:     eng,
 	})
 	if err != nil {
 		return err
 	}
 
-	// Fail-open cleanup on signal
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	cleanup := func() {
 		if appliedLock {
 			if err := win.DisableDNSLockdown(); err != nil {
@@ -382,12 +424,14 @@ func cmdRun(args []string) error {
 			}
 		}
 		if appliedBrowserPolicy {
-			if err := win.RestoreBrowserSecureDNS(); err != nil {
-				log.Printf("restore browser DNS policy: %v", err)
-			}
+			// Leave browser policies in place while the product is "installed".
+			// Only strip them on uninstall / restore-dns, not on every service restart.
+			// (Re-applying on each start is fine; clearing on brief restart would flash DoH back on.)
+			_ = appliedBrowserPolicy
 		}
 		if appliedDNS {
-			if err := win.RestoreFromFile(*snapshotPath); err != nil {
+			// Fail-open: restore DNS when the filter actually stops.
+			if err := win.RestoreFromFile(opt.snapshot); err != nil {
 				log.Printf("restore DNS: %v — run: filterd restore-dns", err)
 			} else {
 				log.Printf("restored system DNS from snapshot")
@@ -396,25 +440,170 @@ func cmdRun(args []string) error {
 		}
 	}
 
+	// Stop signal: service channel or Ctrl+C
+	stopCh := opt.stop
+	var sigCh chan os.Signal
+	if stopCh == nil {
+		sigCh = make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	}
+
+	errCh := make(chan error, 1)
 	go func() {
-		sig := <-sigCh
-		log.Printf("signal %v — shutting down (fail-open restore)", sig)
-		_ = proxy.Shutdown()
-		cleanup()
-		os.Exit(0)
+		log.Printf("starting proxy listen=%s upstream=%s system_dns=%v lockdown=%v",
+			opt.listen, opt.upstream, opt.systemDNS, opt.lockdown)
+		errCh <- proxy.ListenAndServe()
 	}()
 
-	log.Printf("starting proxy listen=%s upstream=%s system_dns=%v lockdown=%v",
-		listenAddr, *upstream, *systemDNS, *lockdown)
-	if *systemDNS {
-		log.Printf("browser tip: fully quit Chrome/Edge (not just the tab) then reopen so DoH policy applies")
+	var runErr error
+	if stopCh != nil {
+		select {
+		case <-stopCh:
+			log.Printf("service stop requested — shutting down (fail-open restore DNS)")
+			_ = proxy.Shutdown()
+			runErr = <-errCh
+		case runErr = <-errCh:
+			log.Printf("proxy exited: %v", runErr)
+		}
+	} else {
+		select {
+		case sig := <-sigCh:
+			log.Printf("signal %v — shutting down (fail-open restore DNS)", sig)
+			_ = proxy.Shutdown()
+			runErr = <-errCh
+		case runErr = <-errCh:
+		}
 	}
-	err = proxy.ListenAndServe()
+
 	cleanup()
-	return err
+	if runErr != nil && !strings.Contains(runErr.Error(), "closed") {
+		return runErr
+	}
+	return nil
+}
+
+// cmdInstall copies binary+lists to Program Files and registers an auto-start service.
+func cmdInstall(args []string) error {
+	fs := flag.NewFlagSet("install", flag.ContinueOnError)
+	lists := fs.String("lists", "", "extra comma-separated list files to copy")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	// Collect files to install next to the service binary.
+	var toCopy []string
+	if p := findFile("nsfw.txt"); p != "" {
+		toCopy = append(toCopy, p)
+	} else {
+		return fmt.Errorf("nsfw.txt not found — place it next to filterd.exe before install")
+	}
+	if p := findFile("allowlist.txt"); p != "" {
+		toCopy = append(toCopy, p)
+	}
+	if *lists != "" {
+		for _, p := range strings.Split(*lists, ",") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				toCopy = append(toCopy, p)
+			}
+		}
+	}
+
+	// Stop existing instance if running in foreground / old service
+	state, installed, _ := win.QueryServiceState()
+	if installed && state == "running" {
+		log.Printf("stopping existing service...")
+		_ = win.StopService()
+		time.Sleep(time.Second)
+	}
+
+	exe, err := win.CopyInstallFiles(toCopy)
+	if err != nil {
+		return err
+	}
+	log.Printf("installed files to %s", win.InstallDir())
+
+	// Service ImagePath: "C:\Program Files\EasyPeasy\filterd\filterd.exe" run -protect
+	// (When SCM starts us, IsWindowsService is true and we ignore CLI — but
+	// keeping run -protect makes sc qc readable and allows manual start.)
+	if err := win.InstallService(exe, []string{"run", "-protect"}); err != nil {
+		return err
+	}
+	log.Printf("Windows service %q registered (Automatic, delayed start, restart on failure)", win.ServiceName)
+
+	if err := win.StartService(); err != nil {
+		return fmt.Errorf("service installed but start failed: %w", err)
+	}
+	log.Printf("service started — DNS protection is active")
+	log.Printf("log: %s", win.DefaultLogPath())
+	fmt.Println()
+	fmt.Println("OK. filterd will start automatically at every boot.")
+	fmt.Println("You can close this window. Manage via services.msc or:")
+	fmt.Println("  filterd status | stop | start | uninstall")
+	return nil
+}
+
+func cmdUninstall(args []string) error {
+	_ = args
+	log.Printf("stopping service...")
+	_ = win.StopService()
+	time.Sleep(1500 * time.Millisecond)
+
+	// Always try fail-open DNS restore
+	_ = win.DisableDNSLockdown()
+	_ = win.RestoreBrowserSecureDNS()
+	if err := win.RestoreFromFile(win.DefaultSnapshotPath()); err != nil {
+		log.Printf("DNS restore: %v (may already be clean)", err)
+	} else {
+		log.Printf("restored system DNS")
+	}
+	_ = win.FlushDNS()
+
+	if err := win.UninstallService(); err != nil {
+		// still try to report
+		log.Printf("uninstall service: %v", err)
+	} else {
+		log.Printf("service removed")
+	}
+
+	// Leave Program Files bits for forensic/debug; optional wipe:
+	// User can delete InstallDir manually. We remove log marker only.
+	fmt.Println("OK. filterd service uninstalled; DNS should be restored.")
+	fmt.Printf("Files left in %s (delete folder manually if desired).\n", win.InstallDir())
+	return nil
+}
+
+func cmdStart(args []string) error {
+	_ = args
+	if err := win.StartService(); err != nil {
+		return err
+	}
+	fmt.Println("service start requested")
+	return nil
+}
+
+func cmdStop(args []string) error {
+	_ = args
+	if err := win.StopService(); err != nil {
+		return err
+	}
+	fmt.Println("service stop requested (DNS restore runs on graceful stop)")
+	return nil
 }
 
 func cmdStatus(args []string) error {
+	_ = args
+	state, installed, err := win.QueryServiceState()
+	if err != nil {
+		fmt.Printf("service query: %v\n", err)
+	} else if !installed {
+		fmt.Printf("service: not installed (run: filterd install)\n")
+	} else {
+		fmt.Printf("service: %s (%s)\n", state, win.ServiceName)
+	}
+	fmt.Printf("install dir: %s\n", win.InstallDir())
+	fmt.Printf("log file:    %s\n", win.DefaultLogPath())
+
 	path := win.DefaultSnapshotPath()
 	fmt.Printf("snapshot path: %s\n", path)
 	if st, err := os.Stat(path); err == nil {
@@ -447,6 +636,12 @@ func cmdRestoreDNS(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	// Prefer stopping service first so it doesn't re-apply DNS
+	_, installed, _ := win.QueryServiceState()
+	if installed {
+		_ = win.StopService()
+		time.Sleep(time.Second)
+	}
 	if err := win.RestoreFromFile(*snapshotPath); err != nil {
 		return err
 	}
@@ -454,5 +649,8 @@ func cmdRestoreDNS(args []string) error {
 	_ = win.RestoreBrowserSecureDNS()
 	_ = win.FlushDNS()
 	fmt.Println("DNS restored from snapshot; lockdown + browser DoH policies cleared.")
+	if installed {
+		fmt.Println("Note: service was stopped. Run filterd start to re-enable protection.")
+	}
 	return nil
 }

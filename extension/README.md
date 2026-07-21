@@ -89,3 +89,23 @@ If the API is offline, domain blocking still works; text/image layers fail open 
 | **Content Guard extension** | Browser domains + search text + page images |
 
 Use **both**.
+
+## Lock browsers (Incognito / Guest / multi-profile)
+
+A normal install is **per profile**. To push machine policy (Admin):
+
+```powershell
+# Elevated PowerShell — disable Guest + Incognito on Chrome/Edge
+cd extension\scripts
+.\lock-browsers.ps1 -IncognitoMode Disable
+
+# After you publish a CRX / have a stable ID, also force-install:
+.\lock-browsers.ps1 -ExtensionId "your32charid" -IncognitoMode Disable
+
+# Soft-block Opera / DuckDuckGo / Brave / Vivaldi processes:
+.\lock-browsers.ps1 -IncognitoMode Disable -BlockUnmanagedBrowsers
+
+.\unlock-browsers.ps1   # undo
+```
+
+See [`docs/BROWSER_LOCKDOWN.md`](../docs/BROWSER_LOCKDOWN.md) for the honest matrix (what REG/policy can and cannot do).

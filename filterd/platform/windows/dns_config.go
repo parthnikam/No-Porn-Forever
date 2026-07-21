@@ -24,12 +24,17 @@ type Snapshot struct {
 }
 
 // DefaultSnapshotPath is where we store previous DNS settings.
+// Uses ProgramData so the LocalSystem service and an admin uninstall share one file.
 func DefaultSnapshotPath() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		dir = os.TempDir()
+	dir := LogDir() // %ProgramData%\EasyPeasy\filterd
+	if dir == "" || dir == string(filepath.Separator) {
+		if pd := os.Getenv("ProgramData"); pd != "" {
+			dir = filepath.Join(pd, "EasyPeasy", "filterd")
+		} else {
+			dir = filepath.Join(os.TempDir(), "EasyPeasy", "filterd")
+		}
 	}
-	return filepath.Join(dir, "filterd", "dns_snapshot.json")
+	return filepath.Join(dir, "dns_snapshot.json")
 }
 
 // GetAdapterDNS returns DNS servers for all connected adapters (IPv4 + IPv6).
@@ -211,14 +216,36 @@ func RestoreDNS(snap *Snapshot) error {
 }
 
 // SnapshotAndApply saves current DNS then points adapters at localhost.
+//
+// If DNS is already on 127.0.0.1 (service restart / crash recovery) and a
+// snapshot file already exists, the snapshot is NOT overwritten — otherwise
+// fail-open restore would only "restore" localhost and brick real DNS.
 func SnapshotAndApply(snapshotPath string) error {
 	current, err := GetAdapterDNS()
 	if err != nil {
 		return fmt.Errorf("snapshot current DNS: %w", err)
 	}
-	if err := SaveSnapshot(snapshotPath, current); err != nil {
-		return err
+
+	alreadyLocal := dnsIsLocalhostOnly(current)
+	_, snapErr := os.Stat(snapshotPath)
+	snapExists := snapErr == nil
+
+	if alreadyLocal && snapExists {
+		// Keep the original pre-filter snapshot; just re-apply + harden.
+		fmt.Fprintf(os.Stderr, "filterd: DNS already localhost — keeping existing snapshot %s\n", snapshotPath)
+	} else if alreadyLocal && !snapExists {
+		// No snapshot to preserve; still write what we have (weak fail-open).
+		fmt.Fprintf(os.Stderr, "filterd: warning: DNS already localhost but no snapshot at %s\n", snapshotPath)
+		if err := SaveSnapshot(snapshotPath, current); err != nil {
+			return err
+		}
+	} else {
+		// Normal first start: remember real DNS, then take over.
+		if err := SaveSnapshot(snapshotPath, current); err != nil {
+			return err
+		}
 	}
+
 	if err := ApplyLocalhostDNS(); err != nil {
 		return err
 	}
@@ -228,6 +255,34 @@ func SnapshotAndApply(snapshotPath string) error {
 		fmt.Fprintf(os.Stderr, "filterd: warning: could not disable smart multi-homed DNS: %v\n", err)
 	}
 	return nil
+}
+
+func dnsIsLocalhostOnly(adapters []AdapterDNS) bool {
+	seenIPv4 := false
+	for _, a := range adapters {
+		if strings.Contains(strings.ToLower(a.Alias), "loopback") {
+			continue
+		}
+		if a.Family == "IPv6" {
+			// Empty IPv6 is fine; ::1 alone is our old misconfig — treat as local.
+			for _, s := range a.Servers {
+				if s != "" && s != "::1" {
+					return false
+				}
+			}
+			continue
+		}
+		if len(a.Servers) == 0 {
+			continue
+		}
+		seenIPv4 = true
+		for _, s := range a.Servers {
+			if s != "127.0.0.1" {
+				return false
+			}
+		}
+	}
+	return seenIPv4
 }
 
 // FlushDNS clears the Windows resolver cache so new policy applies immediately.

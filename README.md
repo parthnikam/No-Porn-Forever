@@ -2,27 +2,24 @@
 
 ## Device-wide domain blocking (`filterd`)
 
-Privileged local DNS filter that loads lists from `dns-blocklists/` and blocks matching hostnames.
+Privileged local DNS filter. **Install once as a Windows service** — auto-starts at boot, no terminal every day.
 
 ```powershell
 cd filterd
-go test ./...
-go build -o filterd.exe ./cmd/filterd
-
-# Policy check (no network changes)
-.\filterd.exe test example.com
-
-# Dev DNS proxy on 127.0.0.1:8053 (loads filterd/nsfw.txt by default)
-.\filterd.exe run
-
-# Windows system-wide (Administrator) — still uses filterd/nsfw.txt
-.\filterd.exe run -listen 127.0.0.1:53 -system-dns -lockdown
-
-# If DNS was left pointing at localhost after a crash:
-.\filterd.exe restore-dns
+.\scripts\pack-ship.ps1
+# Ship: dist\EasyPeasy-filterd-windows-amd64.zip
+# User: unzip → right-click INSTALL.bat → Run as administrator
 ```
 
-See [`filterd/README.md`](filterd/README.md) for architecture, limits (DoH/VPN), and fail-open recovery.
+Or from a built tree (Administrator):
+
+```powershell
+.\filterd.exe install      # service + protect + auto-start
+.\filterd.exe status
+.\filterd.exe uninstall    # stop + restore DNS
+```
+
+See [`filterd/README.md`](filterd/README.md) and [`filterd/SHIP.md`](filterd/SHIP.md).
 
 ## Browser extension (domains + search text + images)
 
@@ -51,6 +48,8 @@ cd ..\extension
 
 See [`extension/README.md`](extension/README.md) and [`classifier-api/`](classifier-api/).  
 Use **filterd + Content Guard extension + classifier-api** together.
+
+**Lock Incognito/Guest (Admin):** `extension/scripts/lock-browsers.ps1` — details in [`docs/BROWSER_LOCKDOWN.md`](docs/BROWSER_LOCKDOWN.md).
 
 ## Content classifiers (models)
 
