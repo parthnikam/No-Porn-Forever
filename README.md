@@ -1,3 +1,5 @@
+<img src="assets/logo_banner.png" alt="Local Image" width="1000" />
+
 # Block Pornographic sites, images and content completely from your device
 
 ## Device-wide domain blocking (`filterd`)
