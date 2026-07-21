@@ -22,33 +22,71 @@ Local DNS domain blocker. Loads HaGeZi-style lists from `dns-blocklists/`, answe
 ```powershell
 cd filterd
 go test ./...
-go build -o filterd.exe ./cmd/filterd
 ```
 
-## Quick test (no admin, no system DNS change)
+## Default list: `filterd/nsfw.txt`
 
-```powershell
-# Policy check only
-.\filterd.exe test something.blocked.test -lists testdata\sample-block.txt
+With no `-lists` flag, filterd loads the HaGeZi NSFW list sitting next to the binary:
 
-# Dev proxy on port 8053 (no admin)
-.\filterd.exe run -lists ..\dns-blocklists\nsfw.txt,..\dns-blocklists\tif.mini.txt -allow allowlist.txt
-
-# In another terminal (helper ships with the module):
-go build -o dnsping.exe ./cmd/dnsping
-.\dnsping.exe 127.0.0.1:8053 example.com. some-blocked-host.
+```text
+filterd/nsfw.txt
 ```
 
-## Windows system-wide (Administrator)
+Optional threat list from the repo can be added explicitly:
 
 ```powershell
-# Take over adapter DNS + listen on :53 + block common public DNS bypass IPs
-.\filterd.exe run -listen 127.0.0.1:53 -system-dns -lockdown -lists ..\dns-blocklists\nsfw.txt,..\dns-blocklists\tif.mini.txt -allow allowlist.txt
+.\filterd.exe run -lists nsfw.txt,..\dns-blocklists\tif.mini.txt
+```
 
-# Emergency recovery if the process died without restoring DNS:
+## Why `test` blocks but Chrome still works
+
+| Command | What it does |
+|--------|----------------|
+| `filterd test domain` | Checks the **list only**. No effect on browsers. |
+| `filterd run` | Listens on **127.0.0.1:8053**. OS DNS is unchanged → browsers ignore it. |
+| `filterd run -protect` | **Admin required.** Sets OS DNS to `127.0.0.1`, listens on port **53**. |
+
+Right now if your adapters still show the router (e.g. `192.168.0.1`), the browser never talks to filterd.
+
+Also disable browser **Secure DNS / DNS over HTTPS** (Chrome: Settings → Privacy → Use secure DNS → **Off** / use your current service provider), or Chrome will skip the OS resolver.
+
+## Quick test (no admin — does not filter the browser)
+
+```powershell
+.\filterd.exe test xhamster.com
+.\filterd.exe run
+# only queries aimed at 127.0.0.1:8053 are filtered
+```
+
+## Filter the browser (Administrator)
+
+```powershell
+# 1) Stop any old filterd first
+Get-Process filterd -ErrorAction SilentlyContinue | Stop-Process -Force
+
+# 2) Start protection (Admin terminal)
+cd filterd
+.\filterd.exe run -protect
+
+# 3) Confirm EVERY adapter is only 127.0.0.1 (not the router on Ethernet/Wi-Fi)
+Get-DnsClientServerAddress -AddressFamily IPv4 | Format-Table InterfaceAlias,ServerAddresses
+
+# 4) Fully quit Chrome/Edge (all windows) and reopen — DoH policy applies on restart
+# 5) Hard-refresh or try an Incognito window (avoids cached IPs)
+
+# Emergency recovery:
 .\filterd.exe restore-dns
-.\filterd.exe status
 ```
+
+### Common bypass we fixed
+
+| Leak | What happens |
+|------|----------------|
+| Ethernet still on router DNS while Wi-Fi is 127.0.0.1 | Windows queries **both**; router answers and site loads |
+| Chrome/Edge Secure DNS (DoH) | Browser resolves over HTTPS; ignores OS DNS |
+| DNS cache | Old IP still used until flush / new browser session |
+
+`-protect` now: rewrites **all** adapters, disables smart multi-homed DNS, turns off Chrome/Edge DoH policy, blocks common DoH IPs on :443, flushes cache.
 
 Upstream default is `1.1.1.1:53`. Lockdown **exempts** that upstream IP from the public-resolver block list so filterd can still recurse.
 

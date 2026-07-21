@@ -34,12 +34,11 @@ func DefaultSnapshotPath() string {
 
 // GetAdapterDNS returns DNS servers for all connected adapters (IPv4 + IPv6).
 func GetAdapterDNS() ([]AdapterDNS, error) {
-	// PowerShell is reliable across Win10/11 for this.
 	ps := `
 $ErrorActionPreference = 'Stop'
 $out = @()
 Get-DnsClientServerAddress -AddressFamily IPv4,IPv6 | Where-Object {
-  $_.ServerAddresses -and $_.InterfaceAlias -notmatch 'Loopback'
+  $_.InterfaceAlias -notmatch 'Loopback'
 } | ForEach-Object {
   $out += [pscustomobject]@{
     alias = $_.InterfaceAlias
@@ -47,7 +46,7 @@ Get-DnsClientServerAddress -AddressFamily IPv4,IPv6 | Where-Object {
     servers = @($_.ServerAddresses)
   }
 }
-$out | ConvertTo-Json -Compress -Depth 4
+if ($out.Count -eq 0) { '[]' } else { $out | ConvertTo-Json -Compress -Depth 4 }
 `
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", ps)
 	raw, err := cmd.Output()
@@ -62,7 +61,6 @@ $out | ConvertTo-Json -Compress -Depth 4
 		return nil, nil
 	}
 
-	// PowerShell may return a single object or an array.
 	var list []AdapterDNS
 	if raw[0] == '{' {
 		var one AdapterDNS
@@ -75,7 +73,6 @@ $out | ConvertTo-Json -Compress -Depth 4
 			return nil, err
 		}
 	}
-	// Normalize family names
 	for i := range list {
 		f := strings.ToLower(list[i].Family)
 		if strings.Contains(f, "v4") || f == "2" {
@@ -112,25 +109,43 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 	return &s, nil
 }
 
-// ApplyLocalhostDNS points IPv4 DNS at 127.0.0.1 and IPv6 at ::1 for active adapters.
+// ApplyLocalhostDNS forces ONLY 127.0.0.1 / ::1 on every non-loopback adapter.
+//
+// Critical: Windows "smart multi-homed name resolution" queries DNS on ALL
+// interfaces in parallel. If Ethernet still has the router (192.168.x.1) while
+// Wi-Fi has 127.0.0.1, the router answer wins and filterd's NXDOMAIN is ignored.
 func ApplyLocalhostDNS() error {
-	adapters, err := activeInterfaceAliases()
+	// Set-DnsClientServerAddress replaces the entire server list (not just primary).
+	ps := `
+$ErrorActionPreference = 'Continue'
+$aliases = Get-DnsClient | Where-Object { $_.InterfaceAlias -notmatch 'Loopback' } | Select-Object -ExpandProperty InterfaceAlias -Unique
+if (-not $aliases) {
+  $aliases = Get-NetAdapter | Where-Object { $_.InterfaceAlias -notmatch 'Loopback' } | Select-Object -ExpandProperty Name
+}
+$failed = @()
+foreach ($alias in $aliases) {
+  try {
+    Set-DnsClientServerAddress -InterfaceAlias $alias -ServerAddresses @('127.0.0.1') -ErrorAction Stop
+  } catch {
+    $failed += "IPv4 ${alias}: $($_.Exception.Message)"
+  }
+  try {
+    Set-DnsClientServerAddress -InterfaceAlias $alias -ServerAddresses @('::1') -AddressFamily IPv6 -ErrorAction Stop
+  } catch {
+    # Some adapters have no IPv6 stack; ignore.
+  }
+}
+if ($failed.Count -gt 0) {
+  Write-Output ('ERRORS:' + ($failed -join ' | '))
+  exit 1
+}
+Write-Output ('OK adapters=' + ($aliases -join ','))
+`
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", ps)
+	out, err := cmd.CombinedOutput()
+	msg := strings.TrimSpace(string(out))
 	if err != nil {
-		return err
-	}
-	if len(adapters) == 0 {
-		return fmt.Errorf("no active network adapters found")
-	}
-	for _, alias := range adapters {
-		// IPv4
-		if err := runNetsh("interface", "ip", "set", "dns", fmt.Sprintf("name=%s", alias), "static", "127.0.0.1", "validate=no"); err != nil {
-			// try alternate quoting
-			if err2 := runNetsh("interface", "ip", "set", "dns", "name="+alias, "static", "127.0.0.1", "validate=no"); err2 != nil {
-				return fmt.Errorf("set IPv4 DNS on %q: %v / %v", alias, err, err2)
-			}
-		}
-		// IPv6 — set to ::1 so queries stay local; if it fails, continue
-		_ = runNetsh("interface", "ipv6", "set", "dns", "name="+alias, "static", "::1", "validate=no")
+		return fmt.Errorf("apply localhost DNS: %v (%s)", err, msg)
 	}
 	return nil
 }
@@ -140,30 +155,47 @@ func RestoreDNS(snap *Snapshot) error {
 	if snap == nil {
 		return fmt.Errorf("nil snapshot")
 	}
+
+	// Group by alias+family already in snapshot entries.
 	var errs []string
 	for _, a := range snap.Adapters {
-		if len(a.Servers) == 0 {
-			// DHCP DNS
-			fam := "ip"
+		alias := a.Alias
+		if alias == "" {
+			continue
+		}
+		servers := a.Servers
+		// Build PowerShell ServerAddresses array
+		var addrList string
+		if len(servers) == 0 {
+			// Reset to DHCP
+			fam := ""
 			if a.Family == "IPv6" {
-				fam = "ipv6"
+				fam = " -AddressFamily IPv6"
 			}
-			if err := runNetsh("interface", fam, "set", "dns", "name="+a.Alias, "dhcp"); err != nil {
-				errs = append(errs, fmt.Sprintf("%s %s dhcp: %v", a.Alias, a.Family, err))
+			ps := fmt.Sprintf(
+				`Set-DnsClientServerAddress -InterfaceAlias '%s'%s -ResetServerAddresses -ErrorAction SilentlyContinue`,
+				escapePS(alias), fam,
+			)
+			if err := runPS(ps); err != nil {
+				errs = append(errs, fmt.Sprintf("%s dhcp: %v", alias, err))
 			}
 			continue
 		}
-		fam := "ip"
+		quoted := make([]string, len(servers))
+		for i, s := range servers {
+			quoted[i] = "'" + escapePS(s) + "'"
+		}
+		addrList = strings.Join(quoted, ",")
+		fam := ""
 		if a.Family == "IPv6" {
-			fam = "ipv6"
+			fam = " -AddressFamily IPv6"
 		}
-		// first server with set, rest with add
-		if err := runNetsh("interface", fam, "set", "dns", "name="+a.Alias, "static", a.Servers[0], "validate=no"); err != nil {
-			errs = append(errs, fmt.Sprintf("%s %s set %s: %v", a.Alias, a.Family, a.Servers[0], err))
-			continue
-		}
-		for i := 1; i < len(a.Servers); i++ {
-			_ = runNetsh("interface", fam, "add", "dns", "name="+a.Alias, a.Servers[i], fmt.Sprintf("index=%d", i+1), "validate=no")
+		ps := fmt.Sprintf(
+			`Set-DnsClientServerAddress -InterfaceAlias '%s'%s -ServerAddresses @(%s) -ErrorAction SilentlyContinue`,
+			escapePS(alias), fam, addrList,
+		)
+		if err := runPS(ps); err != nil {
+			errs = append(errs, fmt.Sprintf("%s set: %v", alias, err))
 		}
 	}
 	if len(errs) > 0 {
@@ -178,11 +210,28 @@ func SnapshotAndApply(snapshotPath string) error {
 	if err != nil {
 		return fmt.Errorf("snapshot current DNS: %w", err)
 	}
-	// If we already point at 127.0.0.1 only, still save what we have
 	if err := SaveSnapshot(snapshotPath, current); err != nil {
 		return err
 	}
-	return ApplyLocalhostDNS()
+	if err := ApplyLocalhostDNS(); err != nil {
+		return err
+	}
+	// Close the multi-interface leak Windows uses by default.
+	if err := DisableSmartMultiHomedResolution(); err != nil {
+		// Non-fatal but important — log via returned warning-style error only if apply failed
+		fmt.Fprintf(os.Stderr, "filterd: warning: could not disable smart multi-homed DNS: %v\n", err)
+	}
+	return nil
+}
+
+// FlushDNS clears the Windows resolver cache so new policy applies immediately.
+func FlushDNS() error {
+	cmd := exec.Command("ipconfig", "/flushdns")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("ipconfig /flushdns: %v (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // RestoreFromFile loads snapshot and restores DNS.
@@ -191,26 +240,118 @@ func RestoreFromFile(snapshotPath string) error {
 	if err != nil {
 		return err
 	}
-	return RestoreDNS(snap)
+	if err := RestoreDNS(snap); err != nil {
+		return err
+	}
+	// Leave SMHNR / browser policies as-is on restore? Better to restore browser policies off.
+	// Keep SMHNR disabled only while protecting; re-enable on restore for cleanliness.
+	_ = EnableSmartMultiHomedResolution()
+	return nil
 }
 
-func activeInterfaceAliases() ([]string, error) {
+// DisableSmartMultiHomedResolution stops Windows from racing DNS queries across
+// every NIC (which bypasses a filter that only rewrote one adapter).
+func DisableSmartMultiHomedResolution() error {
 	ps := `
-Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $_.InterfaceAlias -notmatch 'Loopback' } | Select-Object -ExpandProperty Name
+$ErrorActionPreference = 'Stop'
+$path = 'HKLM:\Software\Policies\Microsoft\Windows NT\DNSClient'
+if (-not (Test-Path $path)) { New-Item -Path $path -Force | Out-Null }
+New-ItemProperty -Path $path -Name 'DisableSmartNameResolution' -PropertyType DWord -Value 1 -Force | Out-Null
+# Also hardens the service-level switch where present
+$p2 = 'HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters'
+if (Test-Path $p2) {
+  New-ItemProperty -Path $p2 -Name 'DisableParallelAandAAAA' -PropertyType DWord -Value 1 -Force | Out-Null
+}
 `
-	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", ps)
-	raw, err := cmd.Output()
+	return runPS(ps)
+}
+
+// EnableSmartMultiHomedResolution undoes DisableSmartMultiHomedResolution.
+func EnableSmartMultiHomedResolution() error {
+	ps := `
+$ErrorActionPreference = 'SilentlyContinue'
+Remove-ItemProperty -Path 'HKLM:\Software\Policies\Microsoft\Windows NT\DNSClient' -Name 'DisableSmartNameResolution' -ErrorAction SilentlyContinue
+Remove-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters' -Name 'DisableParallelAandAAAA' -ErrorAction SilentlyContinue
+`
+	return runPS(ps)
+}
+
+// DisableBrowserSecureDNS turns off Chrome/Edge DoH via machine policy so the
+// browser uses the OS resolver (filterd) instead of encrypted DNS over HTTPS.
+// Also forces ProxyMode=direct so many "VPN extensions" cannot install a proxy
+// (they often work by setting chrome.proxy). Pair with the Domain Guard extension.
+func DisableBrowserSecureDNS() error {
+	ps := `
+$ErrorActionPreference = 'Stop'
+function Ensure-Key($path) {
+  if (-not (Test-Path $path)) { New-Item -Path $path -Force | Out-Null }
+}
+foreach ($path in @(
+  'HKLM:\SOFTWARE\Policies\Google\Chrome',
+  'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
+)) {
+  Ensure-Key $path
+  New-ItemProperty -Path $path -Name 'DnsOverHttpsMode' -PropertyType String -Value 'off' -Force | Out-Null
+  New-ItemProperty -Path $path -Name 'BuiltInDnsClientEnabled' -PropertyType DWord -Value 0 -Force | Out-Null
+  # Prevent VPN extensions from owning the browser proxy stack.
+  New-ItemProperty -Path $path -Name 'ProxyMode' -PropertyType String -Value 'direct' -Force | Out-Null
+}
+`
+	return runPS(ps)
+}
+
+// RestoreBrowserSecureDNS removes the policies we set (user can re-enable in UI).
+func RestoreBrowserSecureDNS() error {
+	ps := `
+$ErrorActionPreference = 'SilentlyContinue'
+foreach ($path in @(
+  'HKLM:\SOFTWARE\Policies\Google\Chrome',
+  'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
+)) {
+  Remove-ItemProperty -Path $path -Name 'DnsOverHttpsMode' -ErrorAction SilentlyContinue
+  Remove-ItemProperty -Path $path -Name 'BuiltInDnsClientEnabled' -ErrorAction SilentlyContinue
+  Remove-ItemProperty -Path $path -Name 'ProxyMode' -ErrorAction SilentlyContinue
+}
+`
+	return runPS(ps)
+}
+
+// VerifyLocalhostDNS reports adapters that still do not point only at loopback.
+func VerifyLocalhostDNS() (bad []string, err error) {
+	list, err := GetAdapterDNS()
 	if err != nil {
 		return nil, err
 	}
-	var aliases []string
-	for _, line := range strings.Split(string(raw), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			aliases = append(aliases, line)
+	for _, a := range list {
+		if strings.Contains(strings.ToLower(a.Alias), "loopback") {
+			continue
+		}
+		if len(a.Servers) == 0 {
+			// empty can mean DHCP inheritance — treat as bad while protecting
+			bad = append(bad, fmt.Sprintf("%s [%s]: (empty/DHCP)", a.Alias, a.Family))
+			continue
+		}
+		for _, s := range a.Servers {
+			if s != "127.0.0.1" && s != "::1" {
+				bad = append(bad, fmt.Sprintf("%s [%s]: %v", a.Alias, a.Family, a.Servers))
+				break
+			}
 		}
 	}
-	return aliases, nil
+	return bad, nil
+}
+
+func escapePS(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
+}
+
+func runPS(script string) error {
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%v (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func runNetsh(args ...string) error {

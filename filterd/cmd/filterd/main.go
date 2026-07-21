@@ -63,48 +63,90 @@ Usage:
 
 Common flags (run / test):
   -lists string
-        Comma-separated blocklist files (default: ../dns-blocklists/nsfw.txt,tif.mini.txt relative to repo)
+        Comma-separated blocklist files (default: filterd/nsfw.txt)
   -allow string
-        Allowlist file (optional)
+        Allowlist file (default: filterd/allowlist.txt if present)
   -listen string
         Listen address (default 127.0.0.1:8053; use 127.0.0.1:53 + admin for system DNS)
   -upstream string
         Upstream DNS host:port (default 1.1.1.1:53)
   -system-dns
-        Snapshot adapter DNS and point it at 127.0.0.1 (Windows, requires admin)
+        Point Windows adapters at 127.0.0.1 so browsers use filterd (requires admin)
   -lockdown
-        Block outbound DNS to common public resolvers (Windows firewall; requires admin)
+        Block outbound DNS to common public resolvers (requires admin)
+  -protect
+        Browser protection: -system-dns + -lockdown + listen 127.0.0.1:53 (requires admin)
   -json
         JSON output for test
 
+IMPORTANT:
+  "filterd test" only checks the list. It does NOT filter Chrome/Edge.
+  Browsers use the OS DNS server. Without -protect / -system-dns they ignore filterd.
+
 Examples:
-  filterd test ads.example.com -lists testdata/sample-block.txt
-  filterd run -lists ..\dns-blocklists\nsfw.txt,..\dns-blocklists\tif.mini.txt
-  filterd run -listen 127.0.0.1:53 -system-dns -lockdown   # elevated
-  filterd restore-dns
+  filterd test xhamster.com                 # list check only
+  filterd run                               # dev proxy on :8053 (browser NOT filtered)
+  filterd run -protect                      # elevated: filter whole machine
+  filterd restore-dns                       # undo system DNS if needed
 `)
 }
 
-func defaultListPaths() []string {
-	// Prefer repo-relative dns-blocklists when running from filterd/
-	candidates := []string{
-		filepath.Join("..", "dns-blocklists", "nsfw.txt"),
-		filepath.Join("..", "dns-blocklists", "tif.mini.txt"),
-		filepath.Join("dns-blocklists", "nsfw.txt"),
-		filepath.Join("dns-blocklists", "tif.mini.txt"),
-	}
-	var found []string
+// searchRoots returns directories to look for nsfw.txt / allowlist.txt.
+func searchRoots() []string {
+	var roots []string
 	seen := map[string]bool{}
-	for _, c := range candidates {
-		if st, err := os.Stat(c); err == nil && !st.IsDir() {
-			abs, _ := filepath.Abs(c)
-			if !seen[abs] {
-				seen[abs] = true
-				found = append(found, c)
-			}
+	add := func(p string) {
+		if p == "" {
+			return
+		}
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			return
+		}
+		if !seen[abs] {
+			seen[abs] = true
+			roots = append(roots, abs)
 		}
 	}
-	return found
+
+	// Prefer the directory that contains the binary (filterd/), then cwd.
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		add(exeDir)
+		add(filepath.Join(exeDir, ".."))
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		add(cwd)
+		add(filepath.Join(cwd, "filterd"))
+		add(filepath.Join(cwd, ".."))
+	}
+	return roots
+}
+
+func findFile(name string) string {
+	for _, root := range searchRoots() {
+		p := filepath.Join(root, name)
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p
+		}
+	}
+	if st, err := os.Stat(name); err == nil && !st.IsDir() {
+		abs, _ := filepath.Abs(name)
+		return abs
+	}
+	return ""
+}
+
+// defaultListPaths returns the NSFW blocklist next to the binary / in filterd/.
+func defaultListPaths() []string {
+	if p := findFile("nsfw.txt"); p != "" {
+		return []string{p}
+	}
+	return nil
+}
+
+func defaultAllowPath() string {
+	return findFile("allowlist.txt")
 }
 
 func loadEngine(listCSV, allowPath string) (*core.Engine, error) {
@@ -114,7 +156,7 @@ func loadEngine(listCSV, allowPath string) (*core.Engine, error) {
 	if strings.TrimSpace(listCSV) == "" {
 		lists = defaultListPaths()
 		if len(lists) == 0 {
-			return nil, fmt.Errorf("no blocklists found; pass -lists path1,path2")
+			return nil, fmt.Errorf("nsfw.txt not found next to filterd (or pass -lists)")
 		}
 	} else {
 		for _, p := range strings.Split(listCSV, ",") {
@@ -135,12 +177,19 @@ func loadEngine(listCSV, allowPath string) (*core.Engine, error) {
 			p, stats.Added, stats.Lines, stats.Skipped, stats.Duplicates, src)
 	}
 
+	if strings.TrimSpace(allowPath) == "" {
+		allowPath = defaultAllowPath()
+	}
 	if allowPath != "" {
-		stats, err := core.LoadListFile(allowPath, "allow", eng.Allow)
-		if err != nil {
-			return nil, err
+		if st, err := os.Stat(allowPath); err == nil && !st.IsDir() {
+			stats, err := core.LoadListFile(allowPath, "allow", eng.Allow)
+			if err != nil {
+				return nil, err
+			}
+			if stats.Added > 0 || stats.Lines > 0 {
+				log.Printf("loaded allowlist %s: +%d domains", allowPath, stats.Added)
+			}
 		}
-		log.Printf("loaded allowlist %s: +%d domains", allowPath, stats.Added)
 	}
 
 	log.Printf("engine ready: %d blocked names, %d allow names", eng.Block.Len(), eng.Allow.Len())
@@ -194,6 +243,7 @@ func hoistFlags(args []string) []string {
 		"-json": true, "--json": true,
 		"-system-dns": true, "--system-dns": true,
 		"-lockdown": true, "--lockdown": true,
+		"-protect": true, "--protect": true,
 		"-h": true, "-help": true, "--help": true,
 	}
 	for i := 0; i < len(args); i++ {
@@ -224,13 +274,29 @@ func cmdRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	lists := fs.String("lists", "", "comma-separated blocklist paths")
 	allow := fs.String("allow", "", "allowlist path")
-	listen := fs.String("listen", "127.0.0.1:8053", "listen address")
+	listen := fs.String("listen", "", "listen address (default 127.0.0.1:8053, or :53 with -system-dns)")
 	upstream := fs.String("upstream", "1.1.1.1:53", "upstream DNS host:port")
-	systemDNS := fs.Bool("system-dns", false, "point Windows adapters at 127.0.0.1")
+	systemDNS := fs.Bool("system-dns", false, "point Windows adapters at 127.0.0.1 (REQUIRED for browsers)")
 	lockdown := fs.Bool("lockdown", false, "block outbound DNS to common public resolvers")
+	protect := fs.Bool("protect", false, "shorthand: -system-dns -lockdown and listen on 127.0.0.1:53")
 	snapshotPath := fs.String("snapshot", win.DefaultSnapshotPath(), "DNS snapshot path")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+
+	if *protect {
+		*systemDNS = true
+		*lockdown = true
+	}
+
+	// Browsers only see filterd if the OS sends DNS to us on :53.
+	listenAddr := *listen
+	if listenAddr == "" {
+		if *systemDNS {
+			listenAddr = "127.0.0.1:53"
+		} else {
+			listenAddr = "127.0.0.1:8053"
+		}
 	}
 
 	eng, err := loadEngine(*lists, *allow)
@@ -238,16 +304,50 @@ func cmdRun(args []string) error {
 		return err
 	}
 
+	if !*systemDNS {
+		log.Printf("")
+		log.Printf("*** DEV MODE: browsers will NOT be filtered ***")
+		log.Printf("*** filterd is only on %s; your OS DNS is unchanged. ***", listenAddr)
+		log.Printf("*** `filterd test` only checks the list file — it does not change the browser. ***")
+		log.Printf("*** For browser blocking, run elevated: ***")
+		log.Printf("***   filterd run -protect ***")
+		log.Printf("*** Also disable Chrome/Edge Secure DNS (use system resolver). ***")
+		log.Printf("")
+	}
+
 	// Optional Windows system integration
 	appliedDNS := false
 	appliedLock := false
+	appliedBrowserPolicy := false
 	if *systemDNS {
-		if _, port, err := net.SplitHostPort(*listen); err == nil && port != "53" {
-			log.Printf("warning: -system-dns sets OS DNS to 127.0.0.1:53 but -listen is %s", *listen)
+		if _, port, err := net.SplitHostPort(listenAddr); err == nil && port != "53" {
+			log.Printf("warning: -system-dns points OS at 127.0.0.1 (port 53) but -listen is %s", listenAddr)
 		}
-		log.Printf("snapshot + apply system DNS → 127.0.0.1 (snapshot %s)", *snapshotPath)
+		log.Printf("snapshot + apply system DNS → 127.0.0.1 on ALL adapters (snapshot %s)", *snapshotPath)
 		if err := win.SnapshotAndApply(*snapshotPath); err != nil {
-			return fmt.Errorf("system-dns: %w (try running as Administrator)", err)
+			return fmt.Errorf("system-dns: %w (run PowerShell/Terminal as Administrator)", err)
+		}
+		if bad, err := win.VerifyLocalhostDNS(); err != nil {
+			log.Printf("verify DNS: %v", err)
+		} else if len(bad) > 0 {
+			log.Printf("WARNING: some adapters still not on localhost DNS (browser may bypass):")
+			for _, b := range bad {
+				log.Printf("  - %s", b)
+			}
+		} else {
+			log.Printf("verified: all adapters use only 127.0.0.1 / ::1")
+		}
+		log.Printf("disabling Chrome/Edge Secure DNS + forcing ProxyMode=direct (blocks many VPN extensions)")
+		if err := win.DisableBrowserSecureDNS(); err != nil {
+			log.Printf("warning: could not set browser policies: %v", err)
+			log.Printf("  manually: turn off Secure DNS; install extension/ Domain Guard for VPN bypass")
+		} else {
+			appliedBrowserPolicy = true
+			log.Printf("Chrome/Edge: DoH off, ProxyMode=direct (restart browser)")
+			log.Printf("VPN extensions still need: load unpacked extension/ (Domain Guard) — see extension/README.md")
+		}
+		if err := win.FlushDNS(); err != nil {
+			log.Printf("flush DNS cache: %v (continuing)", err)
 		}
 		appliedDNS = true
 	}
@@ -256,7 +356,7 @@ func cmdRun(args []string) error {
 		if err != nil {
 			host = *upstream
 		}
-		log.Printf("enabling DNS lockdown (common public resolvers; upstream %s exempt)", host)
+		log.Printf("enabling DNS lockdown (public DNS :53 + DoH :443; upstream %s exempt on :53)", host)
 		if err := win.EnableDNSLockdown(host); err != nil {
 			return fmt.Errorf("lockdown: %w (try running as Administrator)", err)
 		}
@@ -264,7 +364,7 @@ func cmdRun(args []string) error {
 	}
 
 	proxy, err := core.NewProxy(core.ProxyConfig{
-		ListenAddr: *listen,
+		ListenAddr: listenAddr,
 		Upstream:   *upstream,
 		Engine:     eng,
 	})
@@ -275,13 +375,15 @@ func cmdRun(args []string) error {
 	// Fail-open cleanup on signal
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		sig := <-sigCh
-		log.Printf("signal %v — shutting down (fail-open restore)", sig)
-		_ = proxy.Shutdown()
+	cleanup := func() {
 		if appliedLock {
 			if err := win.DisableDNSLockdown(); err != nil {
 				log.Printf("disable lockdown: %v", err)
+			}
+		}
+		if appliedBrowserPolicy {
+			if err := win.RestoreBrowserSecureDNS(); err != nil {
+				log.Printf("restore browser DNS policy: %v", err)
 			}
 		}
 		if appliedDNS {
@@ -290,19 +392,25 @@ func cmdRun(args []string) error {
 			} else {
 				log.Printf("restored system DNS from snapshot")
 			}
+			_ = win.FlushDNS()
 		}
+	}
+
+	go func() {
+		sig := <-sigCh
+		log.Printf("signal %v — shutting down (fail-open restore)", sig)
+		_ = proxy.Shutdown()
+		cleanup()
 		os.Exit(0)
 	}()
 
-	log.Printf("starting proxy listen=%s upstream=%s", *listen, *upstream)
+	log.Printf("starting proxy listen=%s upstream=%s system_dns=%v lockdown=%v",
+		listenAddr, *upstream, *systemDNS, *lockdown)
+	if *systemDNS {
+		log.Printf("browser tip: fully quit Chrome/Edge (not just the tab) then reopen so DoH policy applies")
+	}
 	err = proxy.ListenAndServe()
-	// If ListenAndServe returns, try cleanup
-	if appliedLock {
-		_ = win.DisableDNSLockdown()
-	}
-	if appliedDNS {
-		_ = win.RestoreFromFile(*snapshotPath)
-	}
+	cleanup()
 	return err
 }
 
@@ -343,6 +451,8 @@ func cmdRestoreDNS(args []string) error {
 		return err
 	}
 	_ = win.DisableDNSLockdown()
-	fmt.Println("DNS restored from snapshot; lockdown rules cleared.")
+	_ = win.RestoreBrowserSecureDNS()
+	_ = win.FlushDNS()
+	fmt.Println("DNS restored from snapshot; lockdown + browser DoH policies cleared.")
 	return nil
 }

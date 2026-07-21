@@ -28,5 +28,11 @@ func SnapshotAndApply(string) error           { return errOS() }
 func RestoreFromFile(string) error            { return errOS() }
 func EnableDNSLockdown(string) error          { return errOS() }
 func DisableDNSLockdown() error               { return errOS() }
+func FlushDNS() error                         { return errOS() }
+func DisableBrowserSecureDNS() error          { return errOS() }
+func RestoreBrowserSecureDNS() error          { return errOS() }
+func DisableSmartMultiHomedResolution() error { return errOS() }
+func EnableSmartMultiHomedResolution() error  { return errOS() }
+func VerifyLocalhostDNS() ([]string, error)   { return nil, errOS() }
 
 func errOS() error { return fmt.Errorf("windows DNS helpers are only available on Windows") }
