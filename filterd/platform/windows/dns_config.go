@@ -109,7 +109,12 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 	return &s, nil
 }
 
-// ApplyLocalhostDNS forces ONLY 127.0.0.1 / ::1 on every non-loopback adapter.
+// ApplyLocalhostDNS forces IPv4 DNS to 127.0.0.1 on every non-loopback adapter
+// and CLEARS IPv6 DNS servers.
+//
+// Why not ::1? filterd listens on 127.0.0.1:53 only. Pointing IPv6 DNS at ::1
+// with nothing answering there causes Chrome DNS_PROBE_FINISHED_BAD_CONFIG
+// (nslookup shows Server Address ::1 → no response).
 //
 // Critical: Windows "smart multi-homed name resolution" queries DNS on ALL
 // interfaces in parallel. If Ethernet still has the router (192.168.x.1) while
@@ -129,8 +134,9 @@ foreach ($alias in $aliases) {
   } catch {
     $failed += "IPv4 ${alias}: $($_.Exception.Message)"
   }
+  # Clear IPv6 DNS so Windows does not send queries to ::1 (filterd is IPv4-only).
   try {
-    Set-DnsClientServerAddress -InterfaceAlias $alias -ServerAddresses @('::1') -AddressFamily IPv6 -ErrorAction Stop
+    netsh interface ipv6 delete dnsservers name="$alias" all | Out-Null
   } catch {
     # Some adapters have no IPv6 stack; ignore.
   }
@@ -331,8 +337,19 @@ func VerifyLocalhostDNS() (bad []string, err error) {
 			bad = append(bad, fmt.Sprintf("%s [%s]: (empty/DHCP)", a.Alias, a.Family))
 			continue
 		}
+		// IPv6 with empty servers is OK (we clear IPv6 DNS intentionally).
+		if a.Family == "IPv6" {
+			for _, s := range a.Servers {
+				// ::1 is a misconfiguration for our IPv4-only listener.
+				if s == "::1" || (s != "" && s != "127.0.0.1") {
+					bad = append(bad, fmt.Sprintf("%s [%s]: %v (clear IPv6 DNS; filterd is IPv4-only)", a.Alias, a.Family, a.Servers))
+					break
+				}
+			}
+			continue
+		}
 		for _, s := range a.Servers {
-			if s != "127.0.0.1" && s != "::1" {
+			if s != "127.0.0.1" {
 				bad = append(bad, fmt.Sprintf("%s [%s]: %v", a.Alias, a.Family, a.Servers))
 				break
 			}

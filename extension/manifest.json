@@ -1,24 +1,35 @@
 {
   "manifest_version": 3,
-  "name": "EasyPeasy Domain Guard",
-  "version": "0.1.0",
-  "description": "Blocks NSFW domains at the browser layer — works even when a VPN extension proxies traffic past system DNS.",
+  "name": "EasyPeasy Content Guard",
+  "version": "0.2.0",
+  "description": "Blocks NSFW domains, classifies search/URL intent, and removes non-safe images via a local ML API.",
   "permissions": [
     "webNavigation",
     "tabs",
     "storage",
     "proxy",
-    "alarms"
+    "alarms",
+    "scripting"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "<all_urls>",
+    "http://127.0.0.1:8765/*",
+    "http://localhost:8765/*"
   ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content/image-filter.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
   "action": {
-    "default_title": "EasyPeasy Domain Guard",
+    "default_title": "EasyPeasy Content Guard",
     "default_popup": "popup.html"
   },
   "web_accessible_resources": [

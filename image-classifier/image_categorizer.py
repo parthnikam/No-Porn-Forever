@@ -12,6 +12,7 @@ Labels:
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import sys
 import time
@@ -46,17 +47,21 @@ def resolve_device() -> tuple[torch.device, torch.dtype, str]:
     return torch.device("cpu"), torch.float32, "cpu"
 
 
+_dtype: torch.dtype | None = None
+
+
 def get_model():
     """Lazy-load model + processor onto GPU/CPU once."""
-    global _model, _processor, _device, _device_label
+    global _model, _processor, _device, _device_label, _dtype
     if _model is None:
-        _device, dtype, _device_label = resolve_device()
+        _device, _dtype, _device_label = resolve_device()
         print(f"Loading model: {MODEL_ID} on {_device_label} ...", file=sys.stderr)
         t0 = time.perf_counter()
         _processor = AutoImageProcessor.from_pretrained(MODEL_ID)
+        # torch_dtype is the stable transformers kwarg; keep weights in one dtype.
         _model = SiglipForImageClassification.from_pretrained(
             MODEL_ID,
-            dtype=dtype,
+            torch_dtype=_dtype,
             low_cpu_mem_usage=True,
         )
         _model.to(_device)
@@ -68,6 +73,58 @@ def get_model():
             file=sys.stderr,
         )
     return _model, _processor, _device
+
+
+def _move_inputs(inputs: dict, device: torch.device) -> dict:
+    """Move processor tensors to device and match model floating dtype (fp16/fp32)."""
+    out = {}
+    for k, v in inputs.items():
+        if not hasattr(v, "to"):
+            out[k] = v
+            continue
+        if v.is_floating_point() and _dtype is not None:
+            out[k] = v.to(device=device, dtype=_dtype)
+        else:
+            out[k] = v.to(device=device)
+    return out
+
+
+def classify_pil(img: Image.Image) -> dict:
+    """
+    Classify a PIL image (RGB preferred).
+
+    Returns:
+        {
+            "label": str,
+            "score": float,
+            "scores": {label: float, ...},
+        }
+    """
+    model, processor, device = get_model()
+    img = img.convert("RGB")
+    inputs = processor(images=img, return_tensors="pt")
+    inputs = _move_inputs(inputs, device)
+
+    with torch.no_grad():
+        outputs = model(**inputs)
+        # Softmax in float32 for stable probabilities even when logits are half.
+        probs = torch.nn.functional.softmax(outputs.logits.float(), dim=-1).squeeze(0)
+
+    scores = {
+        ID2LABEL[i]: float(probs[i].item()) for i in range(len(ID2LABEL))
+    }
+    top_idx = int(probs.argmax().item())
+    return {
+        "label": ID2LABEL[top_idx],
+        "score": float(probs[top_idx].item()),
+        "scores": scores,
+    }
+
+
+def classify_bytes(data: bytes) -> dict:
+    """Classify raw image bytes (jpeg/png/webp/…)."""
+    with Image.open(io.BytesIO(data)) as img:
+        return classify_pil(img)
 
 
 def classify(image_path: str | Path) -> dict:
@@ -85,26 +142,8 @@ def classify(image_path: str | Path) -> dict:
     if not path.is_file():
         raise FileNotFoundError(f"Image not found: {path}")
 
-    model, processor, device = get_model()
-
     with Image.open(path) as img:
-        img = img.convert("RGB")
-        inputs = processor(images=img, return_tensors="pt")
-        inputs = {k: v.to(device) for k, v in inputs.items()}
-
-    with torch.no_grad():
-        outputs = model(**inputs)
-        probs = torch.nn.functional.softmax(outputs.logits, dim=-1).squeeze(0)
-
-    scores = {
-        ID2LABEL[i]: float(probs[i].item()) for i in range(len(ID2LABEL))
-    }
-    top_idx = int(probs.argmax().item())
-    return {
-        "label": ID2LABEL[top_idx],
-        "score": float(probs[top_idx].item()),
-        "scores": scores,
-    }
+        return classify_pil(img)
 
 
 def format_result(image_path: str | Path, result: dict) -> str:

@@ -7,7 +7,7 @@
         font-family: "Segoe UI", system-ui, sans-serif;
         margin: 0;
         padding: 12px 14px;
-        min-width: 260px;
+        min-width: 280px;
         background: #121820;
         color: #e7ecf3;
       }
@@ -24,7 +24,7 @@
       .bad { color: #f0a0a0; }
       .warn { color: #e8a838; }
       button {
-        margin-top: 10px;
+        margin-top: 8px;
         width: 100%;
         border: 0;
         border-radius: 8px;
@@ -33,14 +33,25 @@
         color: #fff;
         cursor: pointer;
       }
+      button.secondary {
+        background: #2a3545;
+      }
+      .hint {
+        margin-top: 8px;
+        font-size: 11px;
+        color: #7a8a9e;
+        line-height: 1.4;
+      }
     </style>
   </head>
   <body>
-    <h1>EasyPeasy Domain Guard</h1>
+    <h1>EasyPeasy Content Guard</h1>
     <div class="row" id="list">List: …</div>
+    <div class="row" id="api">Classifier API: …</div>
     <div class="row" id="proxy">Proxy: …</div>
-    <div class="row" id="hint"></div>
-    <button id="reload" type="button">Reload blocklist</button>
+    <div class="row hint" id="hint"></div>
+    <button id="reload" type="button">Reload list + ping API</button>
+    <button id="ping" class="secondary" type="button">Ping API only</button>
     <script src="popup.js"></script>
   </body>
 </html>

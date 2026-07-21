@@ -24,23 +24,39 @@ go build -o filterd.exe ./cmd/filterd
 
 See [`filterd/README.md`](filterd/README.md) for architecture, limits (DoH/VPN), and fail-open recovery.
 
-## Browser VPN extensions
+## Browser extension (domains + search text + images)
 
 System DNS (`filterd`) **cannot** see traffic inside a browser VPN extension
-(proxy tunnel + remote DNS). Install the companion extension:
+(proxy tunnel + remote DNS). The companion extension also runs ML on search
+queries (from the URL) and page images via a **local** API:
 
 ```powershell
-cd extension
+# 1) Local ML API (text + image models) — leave this running
+cd classifier-api
+conda activate py3.10
+pip install -r requirements.txt   # first time
+.\run.ps1
+
+# 2) Load the extension
+cd ..\extension
 .\scripts\sync-list.ps1
 # Chrome → chrome://extensions → Developer mode → Load unpacked → select extension/
 ```
 
-See [`extension/README.md`](extension/README.md). Use **filterd + Domain Guard** together.
+| Layer | Role |
+|-------|------|
+| Domain list | Blocks hosts in `nsfw.txt` (works under VPN extensions) |
+| Search / URL text | Extracts `?q=` etc. → text classifier → block NSFW searches |
+| Images | Classifies `<img>` → removes anything not **Normal** |
 
-## Content classifiers (separate from DNS)
+See [`extension/README.md`](extension/README.md) and [`classifier-api/`](classifier-api/).  
+Use **filterd + Content Guard extension + classifier-api** together.
 
-- `text-classifier/` — NSFW text labels  
-- `image-classifier/` — NSFW image labels / multi-class categorizer  
+## Content classifiers (models)
+
+- `text-classifier/` — NSFW text labels (`safe` / `nsfw`)  
+- `image-classifier/` — multi-class image labels (`Normal`, `Pornography`, …)  
+- `classifier-api/` — FastAPI wrapper the extension calls on `127.0.0.1:8765`  
 
 These are for browser/extension content flows, not the DNS path.
 

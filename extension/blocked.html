@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Site blocked</title>
+    <title>Content blocked</title>
     <style>
       :root {
         color-scheme: light dark;
@@ -65,6 +65,18 @@
         border-radius: 999px;
         margin-bottom: 14px;
       }
+      .reason {
+        display: inline-block;
+        font-size: 0.75rem;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        background: #3a2828;
+        color: #f0a0a0;
+        border: 1px solid #5c3d3d;
+        padding: 4px 8px;
+        border-radius: 999px;
+        margin-left: 6px;
+      }
       .warn {
         background: #3a3020;
         border: 1px solid #6a5528;
@@ -76,30 +88,29 @@
         display: none;
       }
       .warn strong { color: var(--warn); }
-      a {
-        color: var(--accent);
-      }
+      a { color: var(--accent); }
     </style>
   </head>
   <body>
     <div class="card">
-      <div class="badge">EasyPeasy Domain Guard</div>
-      <h1>This site is blocked</h1>
+      <div>
+        <span class="badge">EasyPeasy Content Guard</span>
+        <span class="reason" id="reasonBadge">blocked</span>
+      </div>
+      <h1 id="title">This content is blocked</h1>
       <div class="host" id="host">—</div>
-      <p>
-        The domain is on your local NSFW blocklist. This block is enforced
-        <em>inside the browser</em>, so it still applies when a VPN extension
-        tunnels traffic past system DNS.
+      <p id="message">
+        This navigation was blocked by your local protection policy.
       </p>
+      <p id="detailLine" style="display:none"></p>
       <p>
-        System DNS filtering (filterd) and this extension work together:
-        DNS covers most apps; the extension covers the browser.
+        Domain list, search-text ML, and image filtering work together with
+        system DNS (<code>filterd</code>) when installed.
       </p>
       <div class="warn" id="proxyWarn">
         <strong>Proxy / VPN extension detected.</strong>
-        Another extension is controlling browser proxy settings. Domain Guard
-        blocked this navigation by URL — keep this extension enabled or VPN
-        bypass will work again.
+        Another extension is controlling browser proxy settings. Content Guard
+        blocked this navigation by URL — keep this extension enabled.
       </div>
     </div>
     <script src="blocked.js"></script>
