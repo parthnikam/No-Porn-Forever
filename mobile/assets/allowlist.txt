@@ -1,0 +1,5 @@
+! Local allowlist — domains here win over blocklists
+! One domain per line (bare or ||domain^)
+!
+! Example:
+! ||cdn.example.com^
