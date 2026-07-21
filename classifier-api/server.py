@@ -12,12 +12,12 @@ Uses the existing HuggingFace models under text-classifier/ and image-classifier
 from __future__ import annotations
 
 import base64
-import io
+import logging
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from fastapi import FastAPI, HTTPException
@@ -28,10 +28,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "text-classifier"))
 sys.path.insert(0, str(ROOT / "image-classifier"))
 
-import main as text_clf  # noqa: E402
+import text_classifier as text_clf  # noqa: E402
 import image_categorizer as image_clf  # noqa: E402
 
-app = FastAPI(title="EasyPeasy Classifier API", version="0.1.0")
+log = logging.getLogger("classifier-api")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+app = FastAPI(title="EasyPeasy Classifier API", version="0.1.1")
 
 # Extension service workers are CORS-exempt for host_permissions, but allow
 # broad origins so popup / content-script debugging stays simple.
@@ -65,16 +68,30 @@ def _cache_put(cache: dict[str, dict[str, Any]], key: str, value: dict[str, Any]
 
 
 def _fetch_image_bytes(url: str, timeout: float = 12.0) -> bytes:
+    # Browser-like UA — many CDNs reject bare urllib UA.
     req = Request(
         url,
         headers={
-            "User-Agent": "EasyPeasy-Classifier/0.1",
-            "Accept": "image/*,*/*;q=0.8",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/122.0.0.0 Safari/537.36"
+            ),
+            "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
         },
         method="GET",
     )
-    with urlopen(req, timeout=timeout) as resp:
-        data = resp.read()
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            data = resp.read()
+    except HTTPError as exc:
+        raise ValueError(f"HTTP {exc.code} fetching image") from exc
+    except URLError as exc:
+        raise ValueError(f"Network error fetching image: {exc.reason}") from exc
+    except TimeoutError as exc:
+        raise ValueError("Timeout fetching image") from exc
+
     if not data:
         raise ValueError("Empty image response")
     # Guard against accidental huge downloads.
@@ -125,6 +142,7 @@ def classify_text(body: TextRequest) -> dict[str, Any]:
         result = text_clf.classify(text)
         ms = (time.perf_counter() - t0) * 1000
     except Exception as exc:
+        log.exception("text classify failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     out = {
@@ -140,6 +158,14 @@ def classify_text(body: TextRequest) -> dict[str, Any]:
 
 @app.post("/classify/image")
 def classify_image(body: ImageRequest) -> dict[str, Any]:
+    """
+    Classify an image by URL or base64.
+
+    On fetch/decode failures returns HTTP 200 with:
+      { "ok": false, "keep": true, "error": "..." }
+    so the extension can fail-open without treating it as a hard 500.
+    Successful classifications return ok=true and the usual label fields.
+    """
     if not body.url and not body.image_b64:
         raise HTTPException(status_code=400, detail="Provide url or image_b64")
 
@@ -148,7 +174,6 @@ def classify_image(body: ImageRequest) -> dict[str, Any]:
     if cached is not None:
         return {**cached, "cached": True}
 
-    tmp_path: Path | None = None
     try:
         if body.image_b64:
             raw = body.image_b64
@@ -159,25 +184,25 @@ def classify_image(body: ImageRequest) -> dict[str, Any]:
             assert body.url is not None
             data = _fetch_image_bytes(body.url)
 
-        suffix = ".jpg"
-        fd, name = tempfile.mkstemp(suffix=suffix, prefix="ep-img-")
-        tmp_path = Path(name)
-        with open(fd, "wb") as f:
-            f.write(data)
-
         t0 = time.perf_counter()
-        result = image_clf.classify(tmp_path)
+        result = image_clf.classify_bytes(data)
         ms = (time.perf_counter() - t0) * 1000
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    finally:
-        if tmp_path is not None:
-            try:
-                tmp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
+        # Soft-fail: do not 500 the extension for one bad CDN image.
+        msg = str(exc)
+        log.warning("image classify soft-fail url=%s err=%s", (body.url or "b64")[:120], msg)
+        return {
+            "ok": False,
+            "keep": True,
+            "error": msg,
+            "label": "error",
+            "score": 0.0,
+            "cached": False,
+        }
 
     out = {
+        "ok": True,
+        "keep": None,  # extension decides from label
         "label": result["label"],
         "score": result["score"],
         "scores": result.get("scores", {}),
