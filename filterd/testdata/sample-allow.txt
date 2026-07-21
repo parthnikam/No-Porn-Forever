@@ -1,0 +1,2 @@
+! allowlist
+||ok.parent.example^

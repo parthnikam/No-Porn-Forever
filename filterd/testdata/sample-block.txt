@@ -1,0 +1,5 @@
+[Adblock Plus]
+! test blocklist
+||blocked.test^
+||parent.example^
+0.0.0.0 hosts-style.example
