@@ -28,22 +28,20 @@ The extension watches `webNavigation`, extracts `q` / `query` / …, classifies 
 
 ## Install
 
-### 1) Start the classifier API (required for text + images)
+### 1) Install the classifier API once (required for text + images)
 
 ```powershell
 cd classifier-api
-# use your env that already has torch/transformers, e.g. py3.10
 conda activate py3.10
-pip install -r requirements.txt   # first time
-.\run.ps1
+pip install -r requirements.txt   # first time only
+# Double-click INSTALL.bat  — or:
+.\install.ps1
 ```
 
-Optional warmup (loads both models immediately):
+This registers a Windows scheduled task so the API **starts at every logon** on
+`http://127.0.0.1:8765` (no need to open a terminal each day).
 
-```powershell
-# other terminal
-curl -X POST http://127.0.0.1:8765/warmup
-```
+Dev-only foreground: `python launch.py`
 
 ### 2) Sync domain list + load extension
 

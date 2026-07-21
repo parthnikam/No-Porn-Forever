@@ -28,11 +28,11 @@ System DNS (`filterd`) **cannot** see traffic inside a browser VPN extension
 queries (from the URL) and page images via a **local** API:
 
 ```powershell
-# 1) Local ML API (text + image models) — leave this running
+# 1) Local ML API — install once (auto-starts at every logon)
 cd classifier-api
 conda activate py3.10
 pip install -r requirements.txt   # first time
-.\run.ps1
+.\INSTALL.bat                     # or: .\install.ps1
 
 # 2) Load the extension
 cd ..\extension

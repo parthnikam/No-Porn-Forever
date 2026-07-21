@@ -215,13 +215,19 @@ def classify_image(body: ImageRequest) -> dict[str, Any]:
 
 
 if __name__ == "__main__":
-    import uvicorn
+    # Prefer production launcher (logging, single-instance, warmup).
+    # Falls back to plain uvicorn if launch import fails.
+    try:
+        from launch import main as _launch_main
 
-    # Bind localhost only — models stay on-machine.
-    uvicorn.run(
-        "server:app",
-        host="127.0.0.1",
-        port=8765,
-        reload=False,
-        log_level="info",
-    )
+        raise SystemExit(_launch_main())
+    except ImportError:
+        import uvicorn
+
+        uvicorn.run(
+            "server:app",
+            host="127.0.0.1",
+            port=8765,
+            reload=False,
+            log_level="info",
+        )
