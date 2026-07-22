@@ -28,7 +28,7 @@ sys.path.insert(0, str(REPO_ROOT / "image-classifier"))
 # 127.0.0.1 = desktop extension only.
 # 0.0.0.0   = also reachable from phones on LAN (Flutter mobile guardian).
 # Override: set NOPORNFOREVER_API_HOST or config.json "host".
-HOST = os.environ.get("NOPORNFOREVER_API_HOST", os.environ.get("EASYPEASY_API_HOST", "127.0.0.1"))
+HOST = "0.0.0.0" #os.environ.get("NOPORNFOREVER_API_HOST", os.environ.get("EASYPEASY_API_HOST", "127.0.0.1"))
 PORT = int(os.environ.get("NOPORNFOREVER_API_PORT", os.environ.get("EASYPEASY_API_PORT", "8765")))
 TASK_NAME = "NoPornForeverClassifierAPI"
 

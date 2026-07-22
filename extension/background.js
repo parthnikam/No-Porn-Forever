@@ -13,14 +13,18 @@ import { API_BASE, classifyText, classifyImage, healthCheck } from "./lib/api.js
 const BLOCK_PAGE = chrome.runtime.getURL("blocked.html");
 const LIST_URL = chrome.runtime.getURL("nsfw.txt");
 
-/** Only "Normal" images are kept (user request). */
-const ALLOWED_IMAGE_LABELS = new Set(["Normal"]);
+/**
+ * Image policy: only hard adult labels are removed.
+ * (Previously kept only "Normal", which hid almost every photo and broke
+ * clickable image cards / galleries via pointer-events + parent display:none.)
+ */
+const BLOCK_IMAGE_LABELS = new Set(["pornography", "hentai"]);
 
 /** Text labels that trigger a block. */
 const BLOCK_TEXT_LABELS = new Set(["nsfw"]);
 
 /** Min score to trust a text NSFW prediction. */
-const TEXT_NSFW_MIN_SCORE = 0.55;
+const TEXT_NSFW_MIN_SCORE = 0.72;
 
 /** @type {Set<string>} */
 let blocked = new Set();
@@ -272,9 +276,27 @@ async function maybeBlockBySearchText(tabId, url) {
 
 // ── Navigation hooks ───────────────────────────────────────────────────────
 
+/** tabId → last URL we already handled (dedupe onBefore + onCommitted). */
+const navSeen = new Map();
+
 function handleNavigation(details) {
+  // Main frame only — never touch subframes (ads/widgets) so site chrome works.
   if (details.frameId !== 0) return;
+  if (details.tabId < 0) return;
   if (shouldIgnoreUrl(details.url)) return;
+
+  // Ignore pure hash changes / same-document navigations when possible.
+  if (details.transitionType === "auto_subframe") return;
+
+  const dedupeKey = `${details.tabId}|${details.url}`;
+  const now = Date.now();
+  const prev = navSeen.get(dedupeKey);
+  if (prev && now - prev < 1500) return;
+  navSeen.set(dedupeKey, now);
+  if (navSeen.size > 200) {
+    const first = navSeen.keys().next().value;
+    navSeen.delete(first);
+  }
 
   const host = hostFromUrl(details.url);
   if (host && listReady && isBlockedHost(host)) {
@@ -292,7 +314,7 @@ function handleNavigation(details) {
   maybeBlockBySearchText(details.tabId, details.url);
 }
 
-chrome.webNavigation.onBeforeNavigate.addListener(handleNavigation);
+// Prefer committed (real navigation). onBeforeNavigate alone races soft redirects.
 chrome.webNavigation.onCommitted.addListener(handleNavigation);
 
 // ── Messaging (popup + content script) ─────────────────────────────────────
@@ -307,7 +329,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         proxy: config || null,
         apiStatus,
         apiBase: API_BASE,
-        allowedImageLabels: [...ALLOWED_IMAGE_LABELS],
+        blockedImageLabels: [...BLOCK_IMAGE_LABELS],
       });
     });
     return true;
@@ -346,12 +368,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return;
         }
         const label = result.label || "";
-        const keep = ALLOWED_IMAGE_LABELS.has(label);
+        const labelKey = label.toLowerCase();
+        // Keep everything except hard adult labels (and require decent score).
+        const score = Number(result.score) || 0;
+        const block =
+          BLOCK_IMAGE_LABELS.has(labelKey) && score >= 0.45;
         sendResponse({
           ok: true,
           label,
-          score: result.score,
-          keep,
+          score,
+          keep: !block,
           scores: result.scores,
           ms: result.ms,
           cached: result.cached,

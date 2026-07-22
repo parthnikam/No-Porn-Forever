@@ -1,21 +1,8 @@
 /**
  * Pull free-text search intent from a navigation URL.
- * Prefer query params from known engines; fall back to generic ?q= style params.
+ * Only known search engines — never generic ?q= on every site (that was
+ * hijacking normal links that happen to use q/search/text params).
  */
-
-const SEARCH_PARAM_KEYS = [
-  "q",
-  "query",
-  "p",
-  "text",
-  "wd",
-  "search_query",
-  "search",
-  "k",
-  "keyword",
-  "keywords",
-  "terms",
-];
 
 /** Host suffixes → preferred param order (first hit wins). */
 const ENGINE_PARAMS = [
@@ -28,11 +15,8 @@ const ENGINE_PARAMS = [
   { host: "ecosia.org", params: ["q"] },
   { host: "search.brave.com", params: ["q"] },
   { host: "startpage.com", params: ["query", "q"] },
-  { host: "youtube.com", params: ["search_query", "q"] },
-  { host: "reddit.com", params: ["q"] },
-  { host: "twitter.com", params: ["q"] },
-  { host: "x.com", params: ["q"] },
-  { host: "amazon.", params: ["k", "field-keywords"] },
+  { host: "youtube.com", params: ["search_query"] }, // not plain ?q= watch URLs
+  { host: "www.youtube.com", params: ["search_query"] },
 ];
 
 /**
@@ -51,45 +35,41 @@ export function extractSearchQuery(urlString) {
   const host = u.hostname.toLowerCase();
 
   for (const eng of ENGINE_PARAMS) {
-    if (host.includes(eng.host) || host.endsWith(eng.host.replace(/^\./, ""))) {
+    const needle = eng.host.replace(/^\./, "");
+    if (host === needle || host.endsWith("." + needle) || host.includes(needle)) {
+      // YouTube: only /results search pages, not every watch URL.
+      if (needle.includes("youtube") && !u.pathname.includes("/results")) {
+        continue;
+      }
+      // Google: skip pure static/account hosts if they appear.
+      if (needle === "google.") {
+        if (
+          host.startsWith("accounts.") ||
+          host.startsWith("mail.") ||
+          host.startsWith("drive.") ||
+          host.startsWith("docs.")
+        ) {
+          continue;
+        }
+      }
       for (const key of eng.params) {
         const v = u.searchParams.get(key);
-        if (v && v.trim()) {
+        if (v && v.trim().length >= 2) {
           return { query: v.trim(), source: `${host}:${key}` };
         }
       }
     }
   }
 
-  // Generic fallback: common search param names on any host.
-  for (const key of SEARCH_PARAM_KEYS) {
-    const v = u.searchParams.get(key);
-    if (v && v.trim() && v.trim().length >= 2) {
-      return { query: v.trim(), source: `${host}:${key}` };
-    }
-  }
-
+  // No generic ?q= fallback — too many sites use q/search for filters/nav.
   return null;
 }
 
 /**
- * Lightweight keyword bag from path when there is no search box query.
- * Only used when path looks like free text (rare); mostly search params matter.
  * @param {string} urlString
  * @returns {string}
  */
 export function extractUrlKeywords(urlString) {
-  try {
-    const u = new URL(urlString);
-    const parts = decodeURIComponent(u.pathname)
-      .split(/[\/_\-+.]+/)
-      .filter((p) => p.length > 2 && !/^\d+$/.test(p) && !/^(www|com|org|net|html|php|aspx)$/i.test(p));
-    // Avoid classifying every path segment on normal sites — only if several words.
-    if (parts.length >= 2 && parts.join(" ").length >= 8) {
-      return parts.slice(0, 12).join(" ");
-    }
-  } catch {
-    /* ignore */
-  }
+  // Intentionally unused for auto-block — path keywords caused false positives.
   return "";
 }

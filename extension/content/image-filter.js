@@ -1,14 +1,16 @@
 /**
- * Scan page images, ask the background (→ local ML API) to classify them,
- * and remove anything that is not labeled "Normal".
+ * Scan page images, classify via local ML API, and hide hard-NSFW results.
  *
- * Fail-open: if the API is down, images stay visible.
+ * Critical UX rules:
+ *  - Never kill pointer-events (image links must stay clickable)
+ *  - Never display:none parent wrappers (breaks cards / galleries)
+ *  - Fail-open if the API is down
  */
 
 (() => {
-  const MIN_EDGE = 48; // skip icons / tracking pixels
+  const MIN_EDGE = 64;
   const MAX_CONCURRENT = 2;
-  const QUEUE_CAP = 80;
+  const QUEUE_CAP = 60;
 
   /** @type {WeakSet<Element>} */
   const seen = new WeakSet();
@@ -39,7 +41,6 @@
   }
 
   function absoluteSrc(el) {
-    // Prefer currentSrc (handles srcset), then src, then data-src lazy attrs.
     const raw =
       el.currentSrc ||
       el.src ||
@@ -48,8 +49,9 @@
       el.getAttribute("data-original") ||
       "";
     if (!raw || raw.startsWith("data:image/svg")) return "";
-    // Tiny 1x1 GIF / empty placeholders
     if (raw.startsWith("data:") && raw.length < 200) return "";
+    // Skip our own placeholder
+    if (raw.startsWith("data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP")) return "";
     try {
       return new URL(raw, location.href).href;
     } catch {
@@ -63,10 +65,10 @@
     if (img.dataset.epGuard === "done" || img.dataset.epGuard === "pending") {
       return false;
     }
+    if (img.dataset.epGuard === "removed") return false;
 
     const w = img.naturalWidth || img.width || 0;
     const h = img.naturalHeight || img.height || 0;
-    // If not loaded yet, still queue if CSS size is large enough or unknown.
     if (w > 0 && h > 0 && (w < MIN_EDGE || h < MIN_EDGE)) return false;
 
     const src = absoluteSrc(img);
@@ -75,26 +77,18 @@
     return true;
   }
 
+  /**
+   * Soft hide — keeps layout and parent <a> clickable.
+   * Do NOT set pointer-events:none or display:none on parents.
+   */
   function removeImage(img, label) {
     img.dataset.epGuard = "removed";
     img.dataset.epLabel = label || "";
-    img.style.setProperty("filter", "blur(24px)", "important");
-    img.style.setProperty("visibility", "hidden", "important");
-    img.style.setProperty("pointer-events", "none", "important");
-    // Replace with empty transparent pixel so layout doesn't jump as much.
-    try {
-      img.removeAttribute("srcset");
-      img.src =
-        "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
-      img.alt = "[image removed by Content Guard]";
-    } catch {
-      /* ignore */
-    }
-    // Also hide parent <picture> wrappers if they only hold this image.
-    const pic = img.closest("picture");
-    if (pic) {
-      pic.style.setProperty("display", "none", "important");
-    }
+    img.style.setProperty("filter", "blur(28px) brightness(0.35)", "important");
+    img.style.setProperty("opacity", "0.35", "important");
+    // Keep pointer-events so gallery / card links still work.
+    img.setAttribute("alt", "");
+    img.setAttribute("title", "Hidden by NoPornForever");
   }
 
   function markKept(img, label) {
@@ -102,9 +96,6 @@
     img.dataset.epLabel = label || "Normal";
   }
 
-  /**
-   * @param {HTMLImageElement} img
-   */
   function processImage(img) {
     if (!isCandidate(img)) return;
     seen.add(img);
@@ -124,7 +115,6 @@
     }
 
     schedule(async () => {
-      // Re-check still in document
       if (!img.isConnected) return;
 
       try {
@@ -140,22 +130,19 @@
         }
 
         if (!result || result.ok === false) {
-          // Fail-open
           markKept(img, "api-error");
           return;
         }
 
-        urlCache.set(src, { keep: !!result.keep, label: result.label });
+        const keep = result.keep !== false;
+        urlCache.set(src, { keep, label: result.label });
         if (urlCache.size > 400) {
           const first = urlCache.keys().next().value;
           urlCache.delete(first);
         }
 
-        if (result.keep) {
-          markKept(img, result.label);
-        } else {
-          removeImage(img, result.label);
-        }
+        if (keep) markKept(img, result.label);
+        else removeImage(img, result.label);
       } catch {
         markKept(img, "error");
       }
@@ -164,15 +151,11 @@
 
   function scan(root = document) {
     const imgs = root.querySelectorAll ? root.querySelectorAll("img") : [];
-    for (const img of imgs) {
-      processImage(img);
-    }
+    for (const img of imgs) processImage(img);
   }
 
-  // Initial pass
   scan(document);
 
-  // Late-loading images (lazy, SPA, infinite scroll)
   const mo = new MutationObserver((mutations) => {
     for (const m of mutations) {
       for (const node of m.addedNodes) {
@@ -185,11 +168,15 @@
         m.target instanceof HTMLImageElement &&
         (m.attributeName === "src" || m.attributeName === "srcset")
       ) {
-        // Allow re-check when src changes
         const img = m.target;
-        if (img.dataset.epGuard === "done" || img.dataset.epGuard === "removed") {
+        // Don't re-process images we already soft-hid (src may change under us).
+        if (img.dataset.epGuard === "removed") return;
+        if (img.dataset.epGuard === "done") {
+          // Real navigation of src on a kept image — recheck.
           delete img.dataset.epGuard;
           seen.delete(img);
+        } else if (img.dataset.epGuard === "pending") {
+          return;
         }
         processImage(img);
       }
@@ -203,20 +190,19 @@
     attributeFilter: ["src", "srcset", "data-src"],
   });
 
-  // Images that load after we measured 0×0 size
   document.addEventListener(
     "load",
     (ev) => {
-      if (ev.target instanceof HTMLImageElement) {
-        const img = ev.target;
-        if (img.dataset.epGuard === "pending" || !img.dataset.epGuard) {
-          if (img.dataset.epGuard === "pending") {
-            delete img.dataset.epGuard;
-            seen.delete(img);
-          }
-          processImage(img);
-        }
+      if (!(ev.target instanceof HTMLImageElement)) return;
+      const img = ev.target;
+      if (img.dataset.epGuard === "removed" || img.dataset.epGuard === "done") {
+        return;
       }
+      if (img.dataset.epGuard === "pending") {
+        // Size now known — leave pending job; only re-queue if never scheduled.
+        return;
+      }
+      processImage(img);
     },
     true
   );

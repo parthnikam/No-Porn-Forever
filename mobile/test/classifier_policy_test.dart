@@ -36,6 +36,18 @@ void main() {
       ),
       isFalse,
     );
+    // keep flag must not suppress a real Pornography hit
+    expect(
+      ClassifierApi.isImageNsfw(
+        const ImageClassResult(
+          ok: true,
+          keep: true,
+          label: 'Pornography',
+          score: 0.9,
+        ),
+      ),
+      isTrue,
+    );
     expect(
       ClassifierApi.isImageNsfw(
         const ImageClassResult(
@@ -49,3 +61,4 @@ void main() {
     );
   });
 }
+

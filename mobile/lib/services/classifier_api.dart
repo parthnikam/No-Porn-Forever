@@ -122,16 +122,18 @@ class ClassifierApi {
     return r.label == 'nsfw' && r.score >= minScore;
   }
 
-  /// True when image is adult content (mirrors extension “not Normal” policy,
-  /// but only hard-blocks clear adult labels to reduce false kills).
-  static bool isImageNsfw(ImageClassResult r, {double minScore = 0.45}) {
-    if (!r.ok || r.keep) return false;
-    const bad = {
-      'pornography',
-      'hentai',
-      'enticing or sensual',
-    };
-    return bad.contains(r.label.toLowerCase()) && r.score >= minScore;
+  /// True when image is adult content.
+  /// Note: ignore API `keep` — that field is for the browser extension fail-open path.
+  static bool isImageNsfw(ImageClassResult r, {double minScore = 0.40}) {
+    if (!r.ok) return false;
+    final label = r.label.toLowerCase().trim();
+    if (label == 'pornography' || label == 'hentai') {
+      return r.score >= minScore;
+    }
+    if (label == 'enticing or sensual') {
+      return r.score >= 0.55;
+    }
+    return false;
   }
 }
 

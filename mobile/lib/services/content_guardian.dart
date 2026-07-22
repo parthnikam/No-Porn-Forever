@@ -25,7 +25,7 @@ class GuardianEvent {
 }
 
 /// Orchestrates text + screen classification against the desktop Classifier API.
-/// On hit: lock UI and optionally force-close the app.
+/// Screen trips are primarily handled **natively** (works over Chrome).
 class ContentGuardian {
   ContentGuardian._();
   static final ContentGuardian instance = ContentGuardian._();
@@ -33,21 +33,16 @@ class ContentGuardian {
   final ClassifierApi api = ClassifierApi.instance;
   final ScreenCapture capture = ScreenCapture.instance;
 
-  final ValueNotifier<GuardianState> state =
-      ValueNotifier(GuardianState.idle);
-  final ValueNotifier<String> statusLine =
-      ValueNotifier('Guardian off');
+  final ValueNotifier<GuardianState> state = ValueNotifier(GuardianState.idle);
+  final ValueNotifier<String> statusLine = ValueNotifier('Guardian off');
   final ValueNotifier<GuardianEvent?> lastHit = ValueNotifier(null);
   final ValueNotifier<int> textChecks = ValueNotifier(0);
   final ValueNotifier<int> screenChecks = ValueNotifier(0);
 
   Timer? _textDebounce;
-  Timer? _screenTimer;
-  StreamSubscription? _frameSub;
-  bool _classifyingFrame = false;
+  StreamSubscription? _eventSub;
   bool _enabled = false;
   bool _forceExitOnHit = true;
-  Duration screenInterval = const Duration(seconds: 4);
 
   VoidCallback? onLockout;
 
@@ -59,7 +54,6 @@ class ContentGuardian {
     Duration? screenEvery,
   }) async {
     _forceExitOnHit = forceExitOnHit;
-    if (screenEvery != null) screenInterval = screenEvery;
     if (enabled) {
       await start();
     } else {
@@ -78,9 +72,8 @@ class ContentGuardian {
   Future<void> stop() async {
     _enabled = false;
     _textDebounce?.cancel();
-    _screenTimer?.cancel();
-    await _frameSub?.cancel();
-    _frameSub = null;
+    await _eventSub?.cancel();
+    _eventSub = null;
     await capture.stop();
     if (state.value != GuardianState.locked) {
       state.value = GuardianState.idle;
@@ -88,7 +81,6 @@ class ContentGuardian {
     }
   }
 
-  /// Call from any text field (search box, URL bar, demo input).
   void watchText(String text, {String source = 'text'}) {
     if (!_enabled || state.value == GuardianState.locked) return;
     _textDebounce?.cancel();
@@ -99,7 +91,6 @@ class ContentGuardian {
     });
   }
 
-  /// Immediate check (submit / URL navigate).
   Future<bool> checkTextNow(String text, {String source = 'text'}) async {
     if (!_enabled || state.value == GuardianState.locked) return false;
     return _classifyText(text.trim(), source: source);
@@ -127,7 +118,6 @@ class ContentGuardian {
       }
     } catch (e) {
       statusLine.value = 'Text API error: $e';
-      // Fail-open for connectivity — do not brick typing offline.
     }
     return false;
   }
@@ -135,55 +125,66 @@ class ContentGuardian {
   Future<void> _startScreenLoop() async {
     if (!Platform.isAndroid) {
       statusLine.value =
-          'Screen guard: Android MediaProjection only (iOS: use Safe Browser)';
+          'Screen guard: Android only (iOS: use Safe Browser)';
       return;
     }
     try {
-      final ok = await capture.start();
+      final ok = await capture.start(
+        intervalMs: 2500,
+        quality: 70,
+        maxWidth: 960,
+        apiBaseUrl: api.baseUrl,
+      );
       if (!ok) {
         statusLine.value = 'Screen capture permission denied';
         return;
       }
-      await _frameSub?.cancel();
-      _frameSub = capture.frames.listen((b64) {
-        unawaited(_onFrame(b64));
-      });
-      statusLine.value = 'Screen + text guardian active';
+      await _eventSub?.cancel();
+      _eventSub = capture.events.listen(_onScreenEvent);
+      statusLine.value = 'Screen guard on · ${api.baseUrl}';
     } catch (e) {
       statusLine.value = 'Screen capture failed: $e';
     }
   }
 
-  Future<void> _onFrame(String b64) async {
-    if (!_enabled || _classifyingFrame || state.value == GuardianState.locked) {
-      return;
-    }
-    _classifyingFrame = true;
-    try {
-      statusLine.value = 'Scanning screen…';
-      final r = await api.classifyImageB64(b64);
-      screenChecks.value = screenChecks.value + 1;
-      if (!r.ok) {
-        statusLine.value = 'Screen soft-fail: ${r.error ?? r.label}';
-        return;
-      }
-      statusLine.value =
-          'Screen: ${r.label} ${(r.score * 100).toStringAsFixed(0)}%';
-      if (ClassifierApi.isImageNsfw(r)) {
-        await _trip(
-          GuardianEvent(
-            reason: 'NSFW on screen',
-            detail: 'Image classifier: ${r.label}',
-            source: 'screen',
-            label: r.label,
-            score: r.score,
+  void _onScreenEvent(Map<String, dynamic> event) {
+    if (!_enabled && state.value != GuardianState.locked) return;
+    final type = event['type'] as String? ?? '';
+    switch (type) {
+      case 'classify':
+        screenChecks.value = screenChecks.value + 1;
+        final label = event['label'] as String? ?? '';
+        final score = (event['score'] as num?)?.toDouble() ?? 0;
+        final ok = event['ok'] != false;
+        if (!ok) {
+          statusLine.value =
+              'Screen API: ${event['error'] ?? 'error'}';
+        } else {
+          statusLine.value =
+              'Screen: $label ${(score * 100).toStringAsFixed(0)}%';
+        }
+        break;
+      case 'trip':
+        unawaited(
+          _trip(
+            GuardianEvent(
+              reason: event['reason'] as String? ?? 'NSFW on screen',
+              detail: event['detail'] as String? ?? '',
+              source: 'screen',
+              label: event['label'] as String?,
+              score: (event['score'] as num?)?.toDouble(),
+            ),
+            // Native LockoutActivity already force-closes; avoid double-exit race.
+            forceExit: false,
           ),
         );
-      }
-    } catch (e) {
-      statusLine.value = 'Screen API error: $e';
-    } finally {
-      _classifyingFrame = false;
+        break;
+      case 'status':
+        statusLine.value = 'Screen ${event['status'] ?? ''}';
+        break;
+      case 'frame':
+        // Native is classifying; optional silent tick.
+        break;
     }
   }
 
@@ -193,6 +194,8 @@ class ContentGuardian {
     try {
       final r = await api.classifyImageB64(b64);
       screenChecks.value = screenChecks.value + 1;
+      statusLine.value =
+          'Page: ${r.label} ${(r.score * 100).toStringAsFixed(0)}%';
       if (ClassifierApi.isImageNsfw(r)) {
         await _trip(
           GuardianEvent(
@@ -211,27 +214,23 @@ class ContentGuardian {
     return false;
   }
 
-  Future<void> _trip(GuardianEvent event) async {
+  Future<void> _trip(GuardianEvent event, {bool forceExit = true}) async {
     if (state.value == GuardianState.locked) return;
     state.value = GuardianState.locked;
     lastHit.value = event;
     statusLine.value = 'LOCKED: ${event.reason}';
     onLockout?.call();
-    // Haptic + kill path
     await HapticFeedback.heavyImpact();
-    if (_forceExitOnHit) {
-      // Give lockout UI a moment to paint, then force-close.
-      await Future<void>.delayed(const Duration(milliseconds: 1400));
+    if (_forceExitOnHit && forceExit) {
+      await Future<void>.delayed(const Duration(milliseconds: 1200));
       await stop();
       SystemNavigator.pop();
-      // Hard exit if still alive (Android).
       if (Platform.isAndroid) {
         exit(0);
       }
     }
   }
 
-  /// Unlock after lock when force-exit is disabled (settings / parent PIN later).
   void acknowledgeUnlock() {
     lastHit.value = null;
     state.value = _enabled ? GuardianState.watching : GuardianState.idle;

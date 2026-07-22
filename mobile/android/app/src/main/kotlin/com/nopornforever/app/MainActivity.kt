@@ -112,14 +112,14 @@ class MainActivity : FlutterActivity() {
             .setStreamHandler(object : EventChannel.StreamHandler {
                 override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
                     screenEventSink = events
-                    FrameBus.listener = { b64 ->
-                        runOnUiThread { screenEventSink?.success(b64) }
+                    ScreenEventBus.listener = { map ->
+                        runOnUiThread { screenEventSink?.success(map) }
                     }
                 }
 
                 override fun onCancel(arguments: Any?) {
                     screenEventSink = null
-                    FrameBus.listener = null
+                    ScreenEventBus.listener = null
                 }
             })
     }
@@ -180,10 +180,20 @@ class MainActivity : FlutterActivity() {
                 pendingScreenResult = null
                 pendingScreenArgs = null
                 if (resultCode == Activity.RESULT_OK && data != null) {
-                    val interval = (args?.get("intervalMs") as? Number)?.toLong() ?: 4000L
-                    val quality = (args?.get("quality") as? Number)?.toInt() ?: 55
-                    val maxWidth = (args?.get("maxWidth") as? Number)?.toInt() ?: 720
-                    ScreenCaptureService.start(this, resultCode, data, interval, quality, maxWidth)
+                    val interval = (args?.get("intervalMs") as? Number)?.toLong() ?: 2500L
+                    val quality = (args?.get("quality") as? Number)?.toInt() ?: 70
+                    val maxWidth = (args?.get("maxWidth") as? Number)?.toInt() ?: 960
+                    val apiBase = (args?.get("apiBaseUrl") as? String)
+                        ?: "http://192.168.0.149:8765"
+                    ScreenCaptureService.start(
+                        this,
+                        resultCode,
+                        data,
+                        interval,
+                        quality,
+                        maxWidth,
+                        apiBase,
+                    )
                     res?.success(true)
                 } else {
                     res?.success(false)
